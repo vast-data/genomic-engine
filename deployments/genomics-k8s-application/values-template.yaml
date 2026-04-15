@@ -1,0 +1,137 @@
+global:
+  imageTag: latest
+
+backend:
+  image: vastdatasolutions/genomic-engine-backend
+  replicas: 1
+  port: 8000
+  serviceType: NodePort
+
+frontend:
+  image: vastdatasolutions/genomic-engine-frontend
+  replicas: 1
+  serviceType: NodePort
+
+mock:
+  parabricks:
+    image: vastdatasolutions/genomic-engine-mock-parabricks
+
+vast:
+  access_key: ""
+  secret_key: ""
+
+auth:
+  vms_host: ""
+  tenant_name: "default"
+  # jwt_secret can be any random string you make up. It's used by the backend to sign user sessions.
+  jwt_secret: ""
+
+s3:
+  endpoint: "http://"
+  raw_bucket: "genomics-raw-data"
+  fastq_bucket: "genomics-fastq-files"
+  vcf_bucket: "genomics-vcf-outputs"
+
+vdb:
+  endpoint: "http://"
+  bucket: "genomics-data"
+  schema_name: "genomics"
+
+nvidia:
+  use_api_catalog: false
+  api_key: ""
+
+# BioNeMo service endpoints.
+# Defaults point to NVIDIA cloud (API catalog).
+# Override with local NIM service URLs when nim.enabled: true.
+bionemo:
+  molmim_url: "https://health.api.nvidia.com/v1/biology/nvidia/molmim/generate"
+  diffdock_url: "https://health.api.nvidia.com/v1/biology/mit/diffdock"
+
+embedding:
+  host: ""
+  port: "443"
+  model: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+  dimensions: 2048
+
+llm:
+  host: ""
+  port: "443"
+  model: "meta/llama-3.1-8b-instruct"
+  system_prompt: "You are a clinical genomics assistant. Given patient variant data retrieved from a genomic database, provide clear, evidence-based answers to clinical questions. Always note when findings require clinical validation. Cite specific variants and genes in your response."
+
+job:
+  gpu:
+    image: nvcr.io/nvidia/clara/clara-parabricks:4.7.0-1
+    timeout_seconds: 3600
+    resources:
+      requests:
+        cpu: "2"
+        memory: "32Gi"
+        nvidia.com/gpu: "1"
+      limits:
+        memory: "32Gi"
+        nvidia.com/gpu: "1"
+    nodeSelector:
+      nvidia.com/gpu: "true"
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+  mock:
+    image: vastdatasolutions/genomic-engine-mock-parabricks:dev
+    timeout_seconds: 600
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        memory: "1Gi"
+    nodeSelector: {}
+    tolerations: []
+
+processing_mode: "mock"
+
+# ---------------------------------------------------------------------------
+# Local NIM deployment (optional -- requires GPU nodes with NVIDIA drivers)
+# ---------------------------------------------------------------------------
+# Set nim.enabled: true to deploy all NVIDIA NIM containers in-cluster.
+# When enabled, also set:
+#   nvidia.use_api_catalog: false
+#   embedding.host: nim-embed
+#   embedding.port: "8000"
+#   llm.host: nim-llm
+#   llm.port: "8000"
+#   bionemo.molmim_url: "http://nim-molmim:8000/v1/biology/nvidia/molmim/generate"
+#   bionemo.diffdock_url: "http://nim-diffdock:8000/v1/biology/mit/diffdock"
+# ---------------------------------------------------------------------------
+nim:
+  enabled: false
+  ngc_api_key: ""          # NGC API key -- used for image pull and model download
+  cache_path: /mnt/nim-cache  # hostPath on GPU nodes for model weight cache
+
+  gpu_toleration:
+    key: "sku"
+    operator: "Equal"
+    value: "gpu"
+    effect: "NoSchedule"
+
+  llm:
+    image: nvcr.io/nim/meta/llama-3.1-8b-instruct:latest
+    gpu: 1
+    memory: 24Gi
+
+  embedding:
+    image: nvcr.io/nim/nvidia/llama-3.2-nv-embedqa-1b-v2:latest
+    gpu: 1
+    memory: 8Gi
+
+  molmim:
+    image: nvcr.io/nim/nvidia/molmim:latest
+    gpu: 1
+    memory: 16Gi
+
+  diffdock:
+    image: nvcr.io/nim/mit/diffdock:latest
+    gpu: 1
+    memory: 24Gi

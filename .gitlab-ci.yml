@@ -1,0 +1,280 @@
+include:
+  - project: 'devops/ci-templates'
+    ref: 'main'
+    file: '/templates/external-repo.gitlab-ci.yml'
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"
+    - if: $CI_COMMIT_TAG
+
+stages:
+  - validate
+  - build
+  - security
+  - sync
+
+default:
+  tags:
+    - genomic-engine-runner
+
+variables:
+  IMAGE_REGISTRY: vastdatasolutions
+  VASTDE_CLI_VERSION: "v5.4.1-dev.c0b8b3d5"
+  VASTDE_BUILDER_TAG: "v5.4.1-dev.29d4871e"
+
+validate-version:
+  stage: validate
+  image: alpine:latest
+  script:
+    - apk add --no-cache git
+    - VERSION=$(cat VERSION)
+    - echo "Version ${VERSION}"
+    - echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "ERROR - Invalid semver in VERSION file"; exit 1; }
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        git fetch --tags
+        if git tag -l "v${VERSION}" | grep -q .; then
+          echo "ERROR: Tag v${VERSION} already exists. Bump VERSION before merging to main."
+          exit 1
+        fi
+      fi
+
+secret-scan:
+  stage: validate
+  image: alpine:latest
+  script:
+    - apk add --no-cache git
+    - |
+      echo "Scanning tracked files for hardcoded secrets..."
+      FAIL=0
+      for PATTERN in \
+        'AKIA[0-9A-Z]{16}' \
+        'ASIA[0-9A-Z]{16}' \
+        'PRIVATE KEY-----' \
+        'nvapi-[A-Za-z0-9_-]' \
+        'ghp_[A-Za-z0-9]{36}' \
+        'glpat-[A-Za-z0-9_-]{20}' \
+        'xox[bporas]-[A-Za-z0-9-]' \
+        'sk-[A-Za-z0-9]{20,}'; do
+        HITS=$(git grep -rlEI "$PATTERN" -- . ':!*.md' ':!.gitlab-ci.yml' 2>/dev/null || true)
+        if [ -n "$HITS" ]; then
+          echo "BLOCKED: pattern '${PATTERN}' found in:"
+          echo "$HITS"
+          FAIL=1
+        fi
+      done
+      if [ "$FAIL" -ne 0 ]; then
+        echo "Secret scan failed — remove detected secrets before merging."
+        exit 1
+      fi
+      echo "Secret scan passed — no hardcoded secrets detected."
+
+# --- Application containers (docker build) ---
+
+.build-template:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+  script:
+    - |
+      echo "Waiting for Docker daemon..."
+      for i in $(seq 1 30); do
+        docker info >/dev/null 2>&1 && break
+        sleep 1
+      done
+    - docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
+    - export VERSION=$(cat VERSION)
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        export IMAGE_TAGS="${VERSION} prod latest"
+      else
+        export IMAGE_TAGS="${VERSION} dev"
+      fi
+    - docker build -t ${IMAGE_REGISTRY}/${COMPONENT}:build ${BUILD_CONTEXT}
+    - |
+      for TAG in $IMAGE_TAGS; do
+        docker tag ${IMAGE_REGISTRY}/${COMPONENT}:build ${IMAGE_REGISTRY}/${COMPONENT}:${TAG}
+        docker push ${IMAGE_REGISTRY}/${COMPONENT}:${TAG}
+      done
+
+build-backend:
+  extends: .build-template
+  variables:
+    COMPONENT: genomic-engine-backend
+    BUILD_CONTEXT: ./source-code/application/backend
+  rules:
+    - if: $FORCE_BUILD_ALL == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - source-code/application/backend/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - source-code/application/backend/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH == "main"
+
+build-frontend:
+  extends: .build-template
+  variables:
+    COMPONENT: genomic-engine-frontend
+    BUILD_CONTEXT: ./source-code/application/frontend
+  rules:
+    - if: $FORCE_BUILD_ALL == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - source-code/application/frontend/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - source-code/application/frontend/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH == "main"
+
+build-mock-parabricks:
+  extends: .build-template
+  variables:
+    COMPONENT: genomic-engine-mock-parabricks
+    BUILD_CONTEXT: ./source-code/application/backend/mock/parabricks
+  rules:
+    - if: $FORCE_BUILD_ALL == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - source-code/application/backend/mock/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - source-code/application/backend/mock/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# --- Ingest functions (VAST DataEngine buildpack) ---
+
+.vastde-build-template:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+  script:
+    - |
+      echo "Waiting for Docker daemon..."
+      for i in $(seq 1 30); do
+        docker info >/dev/null 2>&1 && break
+        sleep 1
+      done
+    - apk add --no-cache curl
+    - |
+      curl -fsSL -o /usr/local/bin/vastde \
+        "https://github.com/vast-data/dataengine-cli/releases/download/${VASTDE_CLI_VERSION}/vastde_linux_amd64"
+      chmod +x /usr/local/bin/vastde
+      vastde version
+    - |
+      mkdir -p /root/.vast
+      cat > /root/.vast/config.toml << EOF
+      [auth]
+      password = ''
+      tenant = ''
+      username = ''
+
+      [servers]
+      builder_image_url = 'vastdataorg/vast-builder:${VASTDE_BUILDER_TAG}'
+      vms_url = ''
+      EOF
+    - docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
+    - export VERSION=$(cat VERSION)
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        export IMAGE_TAGS="${VERSION} prod latest"
+      else
+        export IMAGE_TAGS="${VERSION} dev"
+      fi
+    - cd ${BUILD_CONTEXT}
+    - vastde functions build ${COMPONENT}
+    - |
+      for TAG in $IMAGE_TAGS; do
+        docker tag ${COMPONENT}:latest ${IMAGE_REGISTRY}/${COMPONENT}:${TAG}
+        docker push ${IMAGE_REGISTRY}/${COMPONENT}:${TAG}
+      done
+
+build-fastq-registrar:
+  extends: .vastde-build-template
+  variables:
+    COMPONENT: genomic-engine-fastq-registrar
+    BUILD_CONTEXT: ./source-code/ingest/fastq-registrar
+  rules:
+    - if: $FORCE_BUILD_ALL == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - source-code/ingest/fastq-registrar/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - source-code/ingest/fastq-registrar/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH == "main"
+
+build-vcf-parser:
+  extends: .vastde-build-template
+  variables:
+    COMPONENT: genomic-engine-vcf-parser
+    BUILD_CONTEXT: ./source-code/ingest/vcf-parser
+  rules:
+    - if: $FORCE_BUILD_ALL == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - source-code/ingest/vcf-parser/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - source-code/ingest/vcf-parser/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH == "main"
+
+build-variant-processor:
+  extends: .vastde-build-template
+  variables:
+    COMPONENT: genomic-engine-variant-processor
+    BUILD_CONTEXT: ./source-code/ingest/variant-processor
+  rules:
+    - if: $FORCE_BUILD_ALL == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - source-code/ingest/variant-processor/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - source-code/ingest/variant-processor/**/*
+        - VERSION
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# --- GitHub Sync (overrides from external-repo template) ---
+
+sync-branch-to-github:
+  needs:
+    - job: trufflehog-scan
+      optional: false
+    - job: secret-scan
+      optional: false
+    - job: build-backend
+      optional: true
+    - job: build-frontend
+      optional: true
+    - job: build-mock-parabricks
+      optional: true
+    - job: build-fastq-registrar
+      optional: true
+    - job: build-vcf-parser
+      optional: true
+    - job: build-variant-processor
+      optional: true

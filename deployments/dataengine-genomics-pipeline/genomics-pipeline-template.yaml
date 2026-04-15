@@ -1,0 +1,92 @@
+name: genomics-engine
+description: 
+tags:
+namespace: default
+kubernetes_cluster_vrn: vast:dataengine:kubernetes-clusters:k8s
+manifest:
+  triggers:
+    - name: genomics-fastq-trigger-1
+      vrn: vast:dataengine:triggers:genomics-fastq-trigger
+
+    - name: genomics-vcf-trigger-2
+      vrn: vast:dataengine:triggers:genomics-vcf-trigger
+
+
+  function_deployments:
+    - name: genomics-fastq-registrar-3
+      function_vrn: vast:dataengine:functions:genomics-fastq-registrar
+      revision: 1
+      config:
+        log_level: INFO
+      resources:
+        min_concurrency: 1
+        max_concurrency: 10
+        min_cpu: 100m
+        max_cpu: 5000m
+        min_memory: 128Mi
+        max_memory: 256Mi
+        timeout: 60
+        storage: 0Gi
+
+    - name: genomics-vcf-parser-4
+      function_vrn: vast:dataengine:functions:genomics-vcf-parser
+      revision: 1
+      config:
+        log_level: INFO
+      resources:
+        min_concurrency: 1
+        max_concurrency: 10
+        min_cpu: 100m
+        max_cpu: 5000m
+        min_memory: 128Mi
+        max_memory: 256Mi
+        timeout: 60
+        storage: 0Gi
+
+    - name: genomics-variant-processor-5
+      function_vrn: vast:dataengine:functions:genomics-variant-processor
+      revision: 1
+      config:
+        log_level: INFO
+      resources:
+        min_concurrency: 1
+        max_concurrency: 10
+        min_cpu: 100m
+        max_cpu: 5000m
+        min_memory: 128Mi
+        max_memory: 256Mi
+        timeout: 60
+        storage: 0Gi
+
+
+  links:
+    - source:
+        - genomics-fastq-trigger-1
+      destination:
+        - genomics-fastq-registrar-3
+      topic: vast:dataengine:topics:event-broker/genomics
+      config:
+        retries: 3
+        events_order: unordered
+
+    - source:
+        - genomics-vcf-trigger-2
+      destination:
+        - genomics-vcf-parser-4
+      topic: vast:dataengine:topics:event-broker/genomics
+      config:
+        retries: 3
+        events_order: unordered
+
+    - source:
+        - genomics-vcf-parser-4
+      destination:
+        - genomics-variant-processor-5
+      config:
+        retries: 3
+        events_order: unordered
+  config:
+      # No secrets defined
+    environment_variables:
+
+

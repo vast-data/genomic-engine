@@ -1,0 +1,211 @@
+.blueprint-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(11, 12, 16, 0.95);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(5px);
+  overflow: hidden;
+}
+
+.blueprint-page {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  transition: background 0.3s ease, color 0.3s ease;
+  position: relative;
+  overflow-y: auto;
+}
+
+.blueprint-page::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 20% 30%, rgba(115, 200, 253, 0.03) 0%, transparent 50%),
+              radial-gradient(circle at 80% 70%, rgba(115, 200, 253, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: all 0.3s ease;
+  background: var(--bg-nav);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.646875rem;
+}
+
+.header-icon {
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(115, 200, 253, 0.4));
+  transition: filter 0.3s ease;
+}
+
+.page-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.close-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-card-hover);
+}
+
+.page-content {
+  flex: 1;
+  padding: 1.725rem;
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.blueprint-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.platform-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.platform-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(31, 217, 254, 0.1);
+  border: 1px solid rgba(31, 217, 254, 0.3);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.75rem;
+}
+
+.platform-value {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.pipeline-section {
+  background: var(--bg-card);
+  border-radius: 7.245px;
+  padding: 0.9rem;
+  border: 1px solid var(--border-subtle);
+  transition: all 0.3s ease;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2), 0 0 15px rgba(115, 200, 253, 0.05);
+}
+
+.pipeline-section:hover {
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.3), 0 0 25px rgba(115, 200, 253, 0.08);
+  transform: translateY(-1px);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.section-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  filter: drop-shadow(0 0 5px rgba(115, 200, 253, 0.3));
+}
+
+.capabilities-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.capability-item {
+  background: var(--bg-nav);
+  border: 1px solid var(--border-subtle);
+  border-radius: 7.2px;
+  padding: 0.75rem;
+  display: flex;
+  align-items: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 10px rgba(115, 200, 253, 0.05);
+}
+
+.capability-item:hover {
+  transform: translateY(-2.4px) scale(1.02);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 0 30px rgba(115, 200, 253, 0.25);
+  border-color: rgba(115, 200, 253, 0.4);
+  background: var(--bg-card-hover);
+}
+
+@media (max-width: 900px) {
+  .page-content {
+    padding: 1rem;
+  }
+  
+  .blueprint-container {
+    gap: 0.75rem;
+  }
+}

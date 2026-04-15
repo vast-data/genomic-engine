@@ -1,0 +1,49 @@
+# !!! TEMPLATE - Do NOT edit. Copy to genomics-ingest.yaml and fill in values !!!
+#
+# Genomics Ingest Secret
+# All three ingest functions (genomics-fastq-registrar, genomics-vcf-parser,
+# genomics-variant-processor) consume keys from this single secret.
+#
+# Usage:
+#   cp deployments/dataengine-genomics-pipeline/genomics-ingest-template.yaml deployments/dataengine-genomics-pipeline/genomics-ingest.yaml
+#   # Edit genomics-ingest.yaml with your actual credentials
+#   # Upload in DataEngine UI → Secrets → Create → name: genomicsecret
+
+genomicsecret:
+  # VAST credentials (shared across all functions)
+  vast_access_key: ""
+  vast_secret_key: ""
+
+  # S3 endpoint (used by genomics-fastq-registrar, genomics-vcf-parser)
+  s3endpoint: "http://"
+
+  # VastDB query engine (used by genomics-fastq-registrar, genomics-variant-processor)
+  vdbendpoint: "http://"
+  vdbbucket: "genomics-data"
+  vdbschema: "genomics"
+
+  # Backend Integration (used by genomics-fastq-registrar)
+  backend_url: "http://backend.genomics.svc.cluster.local:8000"
+  jwt_secret: ""
+
+  # Processing mode: "mock" for CPU-only mock, "gpu" for real Parabricks
+  processing_mode: "mock"
+
+  # NVIDIA NIM (used by genomics-vcf-parser, genomics-variant-processor)
+  # Cloud (default): set use_api_catalog: true + nvidia_api_key → ignores host/port/scheme fields.
+  # Local NIM:       set use_api_catalog: false + configure host/port/scheme for each service.
+  use_api_catalog: false
+  nvidia_api_key: ""
+
+  # LLM -- used by genomics-vcf-parser for clinical summaries
+  llm_model: "meta/llama-3.1-8b-instruct"
+  llmhost: ""
+  llmport: "8000"
+  llmhttpscheme: "http"
+
+  # Embedding -- used by genomics-variant-processor for variant vectors
+  embeddingmodel: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+  embeddingdimensions: 2048
+  embeddinghost: ""
+  embeddingport: "8000"
+  embeddinghttpscheme: "http"

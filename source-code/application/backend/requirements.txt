@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic>=2.0
+pyyaml
+requests
+boto3
+vastdb==1.1.0
+adbc-driver-manager==1.0.0
+pyarrow==15.0.0
+numpy
+python-multipart
+kubernetes
+PyJWT

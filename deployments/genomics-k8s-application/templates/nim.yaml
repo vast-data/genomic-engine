@@ -1,0 +1,376 @@
+{{- if .Values.nim.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ngc-api-key
+type: Opaque
+data:
+  apiKey: {{ .Values.nim.ngc_api_key | b64enc }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ngc-secret
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {{ printf "{\"auths\":{\"nvcr.io\":{\"username\":\"$oauthtoken\",\"password\":\"%s\"}}}" .Values.nim.ngc_api_key | b64enc }}
+---
+{{- $toleration := .Values.nim.gpu_toleration }}
+{{- $cachePath := .Values.nim.cache_path }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nim-llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nim
+      model: llm
+  template:
+    metadata:
+      labels:
+        app: nim
+        model: llm
+    spec:
+      hostIPC: true
+      shareProcessNamespace: true
+      imagePullSecrets:
+        - name: ngc-secret
+      securityContext:
+        fsGroup: 1000
+      tolerations:
+        - key: {{ $toleration.key | quote }}
+          operator: {{ $toleration.operator | quote }}
+          value: {{ $toleration.value | quote }}
+          effect: {{ $toleration.effect | quote }}
+      initContainers:
+        - name: init-cache
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /opt/nim/.cache/local_cache
+              chown -R 1000:1000 /opt/nim/.cache
+              chmod -R 777 /opt/nim/.cache
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      containers:
+        - name: nim
+          image: {{ .Values.nim.llm.image }}
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              nvidia.com/gpu: {{ .Values.nim.llm.gpu }}
+              memory: {{ .Values.nim.llm.memory }}
+            limits:
+              nvidia.com/gpu: {{ .Values.nim.llm.gpu }}
+              memory: {{ .Values.nim.llm.memory }}
+          env:
+            - name: NIM_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: NIM_CACHE_PATH
+              value: /opt/nim/.cache
+            - name: NIM_OPENAI_API_ENABLED
+              value: "1"
+            - name: NIM_SERVER_PORT
+              value: "8000"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: apiKey
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: {{ $cachePath }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nim-llm
+spec:
+  type: ClusterIP
+  selector:
+    app: nim
+    model: llm
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nim-embed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nim
+      model: embed
+  template:
+    metadata:
+      labels:
+        app: nim
+        model: embed
+    spec:
+      hostIPC: true
+      shareProcessNamespace: true
+      imagePullSecrets:
+        - name: ngc-secret
+      securityContext:
+        fsGroup: 1000
+      tolerations:
+        - key: {{ $toleration.key | quote }}
+          operator: {{ $toleration.operator | quote }}
+          value: {{ $toleration.value | quote }}
+          effect: {{ $toleration.effect | quote }}
+      initContainers:
+        - name: init-cache
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /opt/nim/.cache/local_cache
+              chown -R 1000:1000 /opt/nim/.cache
+              chmod -R 777 /opt/nim/.cache
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      containers:
+        - name: nim
+          image: {{ .Values.nim.embedding.image }}
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              nvidia.com/gpu: {{ .Values.nim.embedding.gpu }}
+              memory: {{ .Values.nim.embedding.memory }}
+            limits:
+              nvidia.com/gpu: {{ .Values.nim.embedding.gpu }}
+              memory: {{ .Values.nim.embedding.memory }}
+          env:
+            - name: NIM_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: NIM_CACHE_PATH
+              value: /opt/nim/.cache
+            - name: NIM_OPENAI_API_ENABLED
+              value: "1"
+            - name: NIM_SERVER_PORT
+              value: "8000"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: apiKey
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: {{ $cachePath }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nim-embed
+spec:
+  type: ClusterIP
+  selector:
+    app: nim
+    model: embed
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nim-molmim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nim
+      model: molmim
+  template:
+    metadata:
+      labels:
+        app: nim
+        model: molmim
+    spec:
+      hostIPC: true
+      shareProcessNamespace: true
+      imagePullSecrets:
+        - name: ngc-secret
+      securityContext:
+        fsGroup: 1000
+      tolerations:
+        - key: {{ $toleration.key | quote }}
+          operator: {{ $toleration.operator | quote }}
+          value: {{ $toleration.value | quote }}
+          effect: {{ $toleration.effect | quote }}
+      initContainers:
+        - name: init-cache
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /opt/nim/.cache/local_cache
+              chown -R 1000:1000 /opt/nim/.cache
+              chmod -R 777 /opt/nim/.cache
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      containers:
+        - name: nim
+          image: {{ .Values.nim.molmim.image }}
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              nvidia.com/gpu: {{ .Values.nim.molmim.gpu }}
+              memory: {{ .Values.nim.molmim.memory }}
+            limits:
+              nvidia.com/gpu: {{ .Values.nim.molmim.gpu }}
+              memory: {{ .Values.nim.molmim.memory }}
+          env:
+            - name: NIM_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: NIM_CACHE_PATH
+              value: /opt/nim/.cache
+            - name: NIM_SERVER_PORT
+              value: "8000"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: apiKey
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: {{ $cachePath }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nim-molmim
+spec:
+  type: ClusterIP
+  selector:
+    app: nim
+    model: molmim
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nim-diffdock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nim
+      model: diffdock
+  template:
+    metadata:
+      labels:
+        app: nim
+        model: diffdock
+    spec:
+      hostIPC: true
+      shareProcessNamespace: true
+      imagePullSecrets:
+        - name: ngc-secret
+      securityContext:
+        fsGroup: 1000
+      tolerations:
+        - key: {{ $toleration.key | quote }}
+          operator: {{ $toleration.operator | quote }}
+          value: {{ $toleration.value | quote }}
+          effect: {{ $toleration.effect | quote }}
+      initContainers:
+        - name: init-cache
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /opt/nim/.cache/local_cache
+              chown -R 1000:1000 /opt/nim/.cache
+              chmod -R 777 /opt/nim/.cache
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      containers:
+        - name: nim
+          image: {{ .Values.nim.diffdock.image }}
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              nvidia.com/gpu: {{ .Values.nim.diffdock.gpu }}
+              memory: {{ .Values.nim.diffdock.memory }}
+            limits:
+              nvidia.com/gpu: {{ .Values.nim.diffdock.gpu }}
+              memory: {{ .Values.nim.diffdock.memory }}
+          env:
+            - name: NIM_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: NIM_CACHE_PATH
+              value: /opt/nim/.cache
+            - name: NIM_SERVER_PORT
+              value: "8000"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api-key
+                  key: apiKey
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: {{ $cachePath }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nim-diffdock
+spec:
+  type: ClusterIP
+  selector:
+    app: nim
+    model: diffdock
+  ports:
+    - port: 8000
+      targetPort: 8000
+{{- end }}
