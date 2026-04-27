@@ -23,7 +23,9 @@ vast:
 auth:
   vms_host: ""
   tenant_name: "default"
-  # jwt_secret can be any random string you make up. It's used by the backend to sign user sessions.
+  # jwt_secret MUST be set to a long random string (e.g. `openssl rand -hex 32`).
+  # The backend refuses to start if this is empty. Same value should be reused on
+  # rolling upgrades, otherwise all existing user sessions are invalidated.
   jwt_secret: ""
 
 s3:
@@ -57,7 +59,11 @@ embedding:
 llm:
   host: ""
   port: "443"
-  model: "meta/llama-3.1-8b-instruct"
+  # NVIDIA cloud API model (when nvidia.use_api_catalog: true).
+  # Empirically nvidia/llama-3.1-nemotron-nano-8b-v1 is ~7x faster than meta/llama-3.1-8b-instruct
+  # on the free tier (~4s vs ~26s for 300-token outputs) with comparable quality.
+  # When nim.enabled: true, the in-cluster NIM container below dictates the model regardless.
+  model: "nvidia/llama-3.1-nemotron-nano-8b-v1"
   system_prompt: "You are a clinical genomics assistant. Given patient variant data retrieved from a genomic database, provide clear, evidence-based answers to clinical questions. Always note when findings require clinical validation. Cite specific variants and genes in your response."
 
 job:

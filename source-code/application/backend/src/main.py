@@ -1,10 +1,21 @@
+import asyncio
+import logging
+import os
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
 
 from src.api.v1 import search, patients, pipelines, register, auth
 from src.services.job_watcher import watch_jobs_loop
 from src.services.auth_dependencies import verify_token
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
+)
+logging.getLogger("uvicorn.access").setLevel(LOG_LEVEL)
 
 app = FastAPI(title="Genomic RAG Engine", version="1.0.0")
 

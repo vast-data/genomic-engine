@@ -36,7 +36,9 @@ genomicsecret:
   nvidia_api_key: ""
 
   # LLM -- used by genomics-vcf-parser for clinical summaries
-  llm_model: "meta/llama-3.1-8b-instruct"
+  # Empirically nvidia/llama-3.1-nemotron-nano-8b-v1 is ~7x faster than meta/llama-3.1-8b-instruct
+  # on the NVIDIA cloud API (~4s vs ~26s for 300-token outputs).
+  llm_model: "nvidia/llama-3.1-nemotron-nano-8b-v1"
   llmhost: ""
   llmport: "8000"
   llmhttpscheme: "http"

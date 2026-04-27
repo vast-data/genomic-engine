@@ -1,4 +1,6 @@
 import logging
+import re
+import time
 from typing import List, Dict, Any, Optional
 
 import requests
@@ -7,7 +9,35 @@ from src.config import settings
 
 NVIDIA_API_CATALOG_URL = "https://integrate.api.nvidia.com/v1"
 
+logger = logging.getLogger(__name__)
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+
+def _short_error(e: Exception) -> str:
+    msg = str(e)
+    if "Read timed out" in msg or "ReadTimeoutError" in msg:
+        return "LLM request timed out"
+    if "ConnectionError" in msg or "Connection refused" in msg:
+        return "LLM endpoint unreachable"
+    return msg.split("\n")[0][:200]
+
+
+def _extract_json_object(text: str) -> str:
+    text = _THINK_BLOCK_RE.sub("", text)
+    text = _JSON_FENCE_RE.sub("", text).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        return text[start:end + 1]
+    return text
+
+
 class LLMService:
+    DEFAULT_TIMEOUT = 55
+    MAX_ATTEMPTS = 2
+
     def __init__(self):
         cfg = settings.llm
         nv = settings.nvidia
@@ -20,6 +50,61 @@ class LLMService:
             self.base_url = NVIDIA_API_CATALOG_URL
         else:
             self.base_url = f"http://{cfg.host}:{cfg.port}/v1"
+
+    def _post_chat(
+        self,
+        label: str,
+        payload: Dict[str, Any],
+        timeout: Optional[int] = None,
+    ) -> str:
+        timeout = timeout or self.DEFAULT_TIMEOUT
+        headers = {"Content-Type": "application/json"}
+        if self.use_api_catalog:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        url = f"{self.base_url}/chat/completions"
+        last_err: Optional[Exception] = None
+
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            t0 = time.perf_counter()
+            try:
+                response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                if response.status_code >= 500:
+                    logger.warning(
+                        "[LLM:%s] retryable http=%d elapsed_ms=%d attempt=%d body=%s",
+                        label, response.status_code, elapsed_ms, attempt,
+                        (response.text or "")[:160],
+                    )
+                    if attempt < self.MAX_ATTEMPTS:
+                        time.sleep(1.0 * attempt)
+                        continue
+                response.raise_for_status()
+                logger.info(
+                    "[LLM:%s] ok http=%d elapsed_ms=%d attempt=%d model=%s",
+                    label, response.status_code, elapsed_ms, attempt, self.model,
+                )
+                content = response.json()["choices"][0]["message"]["content"]
+                return _THINK_BLOCK_RE.sub("", content).strip()
+            except (requests.Timeout, requests.ConnectionError) as e:
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                last_err = e
+                logger.warning(
+                    "[LLM:%s] network err elapsed_ms=%d attempt=%d err=%s",
+                    label, elapsed_ms, attempt, _short_error(e),
+                )
+                if attempt < self.MAX_ATTEMPTS:
+                    time.sleep(1.0 * attempt)
+                    continue
+            except requests.HTTPError as e:
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                logger.error(
+                    "[LLM:%s] http err elapsed_ms=%d attempt=%d err=%s",
+                    label, elapsed_ms, attempt, _short_error(e),
+                )
+                raise
+
+        raise last_err if last_err else RuntimeError(f"LLM:{label} exhausted retries")
 
     def explain_variant(self, variant: Dict[str, Any]) -> str:
         prompt = (
@@ -45,23 +130,10 @@ class LLMService:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
         ]
-
-        headers = {"Content-Type": "application/json"}
-        if self.use_api_catalog:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                json={"model": self.model, "messages": messages, "max_tokens": 1024, "temperature": 0.3},
-                headers=headers,
-                timeout=90,
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            logging.error(f"LLM explanation failed: {e}")
-            raise
+        return self._post_chat(
+            "explain",
+            {"model": self.model, "messages": messages, "max_tokens": 1024, "temperature": 0.3},
+        )
 
     def generate_insights(self, variant: Dict[str, Any], patient_data: Optional[Dict[str, Any]] = None) -> str:
         patient_context = ""
@@ -78,7 +150,8 @@ class LLMService:
             "You are a clinical genomics assistant. Provide a statistical overview, demographics comparison, "
             "and drug recommendations based on public research for this specific genetic variant.\n"
             f"{patient_context}\n"
-            "Return the output as a valid JSON object matching this exact structure:\n"
+            "Respond with ONLY a JSON object. No prose, no <think> tags, no markdown fences. "
+            "The JSON must match this exact structure:\n"
             "{\n"
             "  \"population_frequency_pct\": 0.5,\n"
             "  \"likelihood_of_disease_evolvement_pct\": 45.0,\n"
@@ -109,29 +182,16 @@ class LLMService:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
         ]
-
-        headers = {"Content-Type": "application/json"}
-        if self.use_api_catalog:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                json={
-                    "model": self.model, 
-                    "messages": messages, 
-                    "max_tokens": 1024, 
-                    "temperature": 0.2,
-                    "response_format": {"type": "json_object"}
-                },
-                headers=headers,
-                timeout=90,
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            logging.error(f"LLM insights failed: {e}")
-            raise
+        raw = self._post_chat(
+            "insights",
+            {
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": 1024,
+                "temperature": 0.2,
+            },
+        )
+        return _extract_json_object(raw)
 
     def analyze_patient(self, patient: Dict[str, Any], variants: List[Dict[str, Any]]) -> str:
         if not variants:
@@ -169,21 +229,13 @@ class LLMService:
             },
         ]
 
-        headers = {"Content-Type": "application/json"}
-        if self.use_api_catalog:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
         try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                json={"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": 0.3},
-                headers=headers,
-                timeout=120,
+            return self._post_chat(
+                "patient_analysis",
+                {"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": 0.3},
             )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            logging.error(f"LLM patient analysis failed: {e}")
+            logger.error("[LLM:patient_analysis] giving up err=%s", _short_error(e))
             return "Failed to generate patient analysis."
 
     def synthesize(self, query: str, variant_contexts: List[Dict[str, Any]], patient_id: Optional[str] = None, quality: Optional[str] = None) -> str:
@@ -198,7 +250,7 @@ class LLMService:
             f"Significance: {v.get('clinical_significance', 'Unknown')} | "
             f"Desc: {v.get('variant_description', '')} "
             f"(similarity: {v.get('similarity_score', 0):.3f}, quality: {v.get('quality', 0)})"
-            for v in variant_contexts[:100]  # Increased to 100 to ensure we pass enough variants
+            for v in variant_contexts[:100]
         )
 
         filter_text = ""
@@ -222,19 +274,10 @@ class LLMService:
             },
         ]
 
-        headers = {"Content-Type": "application/json"}
-        if self.use_api_catalog:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
         try:
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                json={"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": 0.3},
-                headers=headers,
-                timeout=120,
+            return self._post_chat(
+                "synthesize",
+                {"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": 0.3},
             )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            logging.error(f"LLM synthesis failed: {e}")
-            return f"LLM synthesis unavailable: {e}"
+            return f"LLM synthesis unavailable: {_short_error(e)}"

@@ -1,10 +1,37 @@
 import logging
 import hashlib
+import time
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Callable, Dict, List, Any
 
 import vastdb
+import vastdb.errors
 import pyarrow as pa
+import requests
+
+
+_RETRYABLE_ERRORS = (
+    vastdb.errors.ConnectionError,
+    requests.exceptions.ConnectionError,
+    ConnectionResetError,
+    TimeoutError,
+)
+
+
+def _retry(operation: str, fn: Callable[[], Any], attempts: int = 3, base_delay: float = 1.0) -> Any:
+    last_err: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except _RETRYABLE_ERRORS as e:
+            last_err = e
+            logging.warning(
+                "[RETRY] %s attempt=%d/%d err=%s",
+                operation, attempt, attempts, type(e).__name__,
+            )
+            if attempt < attempts:
+                time.sleep(base_delay * attempt)
+    raise last_err if last_err else RuntimeError(f"{operation} exhausted retries")
 
 
 class VastDBVariantsClient:
@@ -48,8 +75,8 @@ class VastDBVariantsClient:
             ssl_verify=False,
         )
 
-    def ensure_schema_and_table(self) -> bool:
-        try:
+    def ensure_schema_and_table(self) -> None:
+        def _do() -> None:
             with self.session.transaction() as tx:
                 bucket = tx.bucket(self.bucket_name)
                 schema = bucket.schema(self.schema_name, fail_if_missing=False)
@@ -58,14 +85,11 @@ class VastDBVariantsClient:
                 table = schema.table(self.table_name, fail_if_missing=False)
                 if table is None:
                     schema.create_table(self.table_name, columns=self.schema_columns)
-            return True
-        except Exception as e:
-            logging.error(f"Failed to ensure schema/table: {e}")
-            return False
+
+        _retry("ensure_schema_and_table", _do)
 
     def store_variants(self, variants: List[Dict[str, Any]], pipeline_run_id: str = "") -> int:
-        if not self.ensure_schema_and_table():
-            return 0
+        self.ensure_schema_and_table()
 
         stored = 0
         records = []
@@ -104,20 +128,20 @@ class VastDBVariantsClient:
         if not records:
             return 0
 
-                # Batch insert using pyarrow chunks for VastDB efficiency
         batch_size = 1000
         for i in range(0, len(records), batch_size):
             batch_records = records[i:i + batch_size]
-            try:
-                arrow_table = pa.Table.from_pylist(batch_records, schema=self.schema_columns)
+            arrow_table = pa.Table.from_pylist(batch_records, schema=self.schema_columns)
+
+            def _insert() -> None:
                 with self.session.transaction() as tx:
                     bucket = tx.bucket(self.bucket_name)
                     schema = bucket.schema(self.schema_name)
                     table = schema.table(self.table_name)
                     table.insert(arrow_table)
-                stored += len(batch_records)
-            except Exception as e:
-                logging.error(f"Failed to insert batch of {len(batch_records)} variants: {e}")
+
+            _retry(f"insert_batch[{i}:{i+len(batch_records)}]", _insert)
+            stored += len(batch_records)
 
         return stored
 

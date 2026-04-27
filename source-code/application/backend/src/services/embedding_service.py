@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import List
 
 import requests
@@ -6,6 +7,8 @@ import requests
 from src.config import settings
 
 NVIDIA_API_CATALOG_URL = "https://integrate.api.nvidia.com/v1"
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
@@ -36,16 +39,35 @@ class EmbeddingService:
             "encoding_format": "float",
         }
 
-        response = requests.post(
-            f"{self.base_url}/embeddings",
-            json=payload,
-            headers=headers,
-            timeout=60,
-        )
+        t0 = time.perf_counter()
+        try:
+            response = requests.post(
+                f"{self.base_url}/embeddings",
+                json=payload,
+                headers=headers,
+                timeout=60,
+            )
+        except Exception as e:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            logger.error(
+                "[EMBED] request failed elapsed_ms=%d input_type=%s n=%d err=%s",
+                elapsed_ms, input_type, len(texts), e,
+            )
+            raise
 
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
         if response.status_code != 200:
-            logging.error(f"Embedding API error {response.status_code}: {response.text}")
+            logger.error(
+                "[EMBED] http=%d elapsed_ms=%d input_type=%s n=%d body=%s",
+                response.status_code, elapsed_ms, input_type, len(texts), response.text[:300],
+            )
 
         response.raise_for_status()
         result = response.json()
-        return [item["embedding"] for item in result["data"]]
+        embeddings = [item["embedding"] for item in result["data"]]
+        logger.info(
+            "[EMBED] ok http=%d elapsed_ms=%d input_type=%s n=%d dims=%d",
+            response.status_code, elapsed_ms, input_type, len(texts),
+            len(embeddings[0]) if embeddings else 0,
+        )
+        return embeddings

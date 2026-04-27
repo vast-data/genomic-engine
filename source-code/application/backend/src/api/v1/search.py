@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -35,6 +36,19 @@ class SearchResponse(BaseModel):
     results: List[Dict[str, Any]]
     synthesis: Optional[str] = None
     total: int
+
+
+class SynthesizeRequest(BaseModel):
+    query: str
+    variants: List[Dict[str, Any]]
+    patient_id: Optional[str] = None
+    quality: Optional[str] = None
+
+
+class SynthesizeResponse(BaseModel):
+    query: str
+    synthesis: str
+    elapsed_ms: int
 
 
 class ExplainRequest(BaseModel):
@@ -379,8 +393,22 @@ async def get_stats():
 
 @router.post("/search", response_model=SearchResponse)
 async def search_variants(request: SearchRequest):
-    query_embedding = embedder.embed_query(request.query)
+    t_start = time.perf_counter()
+    logger.info(
+        "[SEARCH] start query=%r limit=%d gene=%s patient=%s sig=%s quality=%s",
+        request.query, request.limit, request.gene, request.patient_id,
+        request.clinical_significance, request.quality,
+    )
 
+    t_embed = time.perf_counter()
+    try:
+        query_embedding = embedder.embed_query(request.query)
+    except Exception as e:
+        logger.exception("[SEARCH] embed failed query=%r", request.query)
+        raise HTTPException(status_code=502, detail=f"Embedding service failed: {e}")
+    embed_ms = int((time.perf_counter() - t_embed) * 1000)
+
+    t_vss = time.perf_counter()
     results = vastdb.search_variants(
         query_embedding=query_embedding,
         limit=request.limit,
@@ -389,14 +417,54 @@ async def search_variants(request: SearchRequest):
         patient_filter=request.patient_id,
         significance_filter=request.clinical_significance,
     )
+    vss_ms = int((time.perf_counter() - t_vss) * 1000)
 
-    synthesis = None
-    if request.synthesize and results:
-        synthesis = llm.synthesize(request.query, results, request.patient_id, request.quality)
+    total_ms = int((time.perf_counter() - t_start) * 1000)
+    logger.info(
+        "[SEARCH] done rows=%d embed_ms=%d vss_ms=%d total_ms=%d",
+        len(results), embed_ms, vss_ms, total_ms,
+    )
 
     return SearchResponse(
         query=request.query,
         results=results,
-        synthesis=synthesis,
+        synthesis=None,
         total=len(results),
+    )
+
+
+@router.post("/search/synthesize", response_model=SynthesizeResponse)
+async def synthesize_search(request: SynthesizeRequest):
+    if not request.variants:
+        return SynthesizeResponse(
+            query=request.query,
+            synthesis="No relevant variants found for your query.",
+            elapsed_ms=0,
+        )
+
+    logger.info(
+        "[SYNTHESIZE] start query=%r variants=%d patient=%s",
+        request.query, len(request.variants), request.patient_id,
+    )
+    t_start = time.perf_counter()
+    try:
+        synthesis = llm.synthesize(
+            request.query, request.variants, request.patient_id, request.quality,
+        )
+    except Exception as e:
+        elapsed_ms = int((time.perf_counter() - t_start) * 1000)
+        logger.exception("[SYNTHESIZE] failed elapsed_ms=%d", elapsed_ms)
+        raise HTTPException(status_code=504, detail=f"LLM synthesis failed: {e}")
+
+    elapsed_ms = int((time.perf_counter() - t_start) * 1000)
+    ok = not synthesis.startswith("LLM synthesis unavailable")
+    logger.info("[SYNTHESIZE] done ok=%s elapsed_ms=%d", ok, elapsed_ms)
+
+    if not ok:
+        raise HTTPException(status_code=504, detail=synthesis)
+
+    return SynthesizeResponse(
+        query=request.query,
+        synthesis=synthesis,
+        elapsed_ms=elapsed_ms,
     )

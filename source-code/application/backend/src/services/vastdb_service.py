@@ -465,13 +465,9 @@ class VastDBService:
         if patient_filter:
             where_clauses.append(f"patient_id = '{patient_filter}'")
         if significance_filter:
-            sigs = []
-            for s in significance_filter:
-                sigs.append(s.replace("'", "''"))
-                sigs.append(s.replace("'", "''").lower())
-                sigs.append(s.replace("'", "''").capitalize())
-            sigs_str = "', '".join(set(sigs))
-            where_clauses.append(f"clinical_significance IN ('{sigs_str}')")
+            sigs_lower = sorted({s.replace("'", "''").lower() for s in significance_filter})
+            sigs_str = "', '".join(sigs_lower)
+            where_clauses.append(f"LOWER(clinical_significance) IN ('{sigs_str}')")
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -551,7 +547,9 @@ class VastDBService:
                 for s in significance_filter:
                     sigs.add(s)
                     sigs.add(s.lower())
+                    sigs.add(s.upper())
                     sigs.add(s.capitalize())
+                    sigs.add(s.title())
                 p = _.clinical_significance.isin(list(sigs))
                 predicate = predicate & p if predicate is not None else p
 

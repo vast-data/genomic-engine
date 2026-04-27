@@ -24,11 +24,14 @@ api.interceptors.response.use(
   }
 );
 
+const LLM_TIMEOUT_MS = 125000;
+
 export const login = (credentials) => api.post('/auth/login', credentials);
 export const searchVariants = (params) => api.post('/search', params);
+export const synthesizeSearch = (params) => api.post('/search/synthesize', params, { timeout: LLM_TIMEOUT_MS });
 export const getVariantById = (variantId) => api.get(`/search/variant/${encodeURIComponent(variantId)}`);
-export const explainVariant = (variant) => api.post('/search/explain', { variant });
-export const getInsights = (variant) => api.post('/search/insights', { variant });
+export const explainVariant = (variant) => api.post('/search/explain', { variant }, { timeout: LLM_TIMEOUT_MS });
+export const getInsights = (variant) => api.post('/search/insights', { variant }, { timeout: LLM_TIMEOUT_MS });
 export const getPatient = (patientId) => api.get(`/patients/${patientId}`);
 export const getPatientVariants = (patientId, params) => api.get(`/patients/${patientId}/variants`, { params });
 export const getStats = () => api.get('/stats');

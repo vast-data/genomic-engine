@@ -4,7 +4,7 @@ import { Search, Sparkles, Database, ChevronDown, ChevronUp, Loader, BarChart2, 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { searchVariants, getVariantById, explainVariant, getInsights, getPatient, getStats, generateMolecules, lookupStructures, dockMolecule, getVariantMolecules, annotateMolecule } from '../services/api';
+import { searchVariants, synthesizeSearch, getVariantById, explainVariant, getInsights, getPatient, getStats, generateMolecules, lookupStructures, dockMolecule, getVariantMolecules, annotateMolecule } from '../services/api';
 
 const Viewer3D = ({ proteinPdb, ligandSdf }) => {
   const containerRef = useRef(null);
@@ -733,6 +733,9 @@ function SearchPage() {
   const [results, setResults] = useState([]);
   const [synthesis, setSynthesis] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [synthLoading, setSynthLoading] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+  const [synthError, setSynthError] = useState(null);
   const [geneFilter, setGeneFilter] = useState('');
   const [qualityFilter, setQualityFilter] = useState('');
   const [patientFilter, setPatientFilter] = useState('');
@@ -767,9 +770,13 @@ function SearchPage() {
     if (!q.trim()) return;
     setLoading(true);
     setSynthesis(null);
+    setSynthError(null);
+    setSearchError(null);
     setPatientData(null);
     const activeSigFilter = sigOverride !== undefined ? sigOverride : sigFilter;
     const activeGene = geneOverride !== undefined ? geneOverride : geneFilter;
+
+    let uniqueResults = [];
     try {
       const { data } = await searchVariants({
         query: q,
@@ -778,7 +785,7 @@ function SearchPage() {
         quality: qualityFilter || null,
         patient_id: pFilter || null,
         clinical_significance: activeSigFilter.length > 0 ? activeSigFilter : null,
-        synthesize: synthesizeFlag,
+        synthesize: false,
       });
 
       const deduped = {};
@@ -796,10 +803,8 @@ function SearchPage() {
           existing.cache_hits_count = (existing.cache_hits_count || 0) + (v.cache_hits_count || 0);
         }
       }
-      const uniqueResults = Object.values(deduped);
-
+      uniqueResults = Object.values(deduped);
       setResults(uniqueResults);
-      setSynthesis(data.synthesis || null);
 
       if (pFilter) {
         try {
@@ -809,10 +814,32 @@ function SearchPage() {
           console.error("Patient not found", e);
         }
       }
-    } catch {
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || 'Search failed';
+      setSearchError(detail);
       setResults([]);
+      setLoading(false);
+      return;
     }
     setLoading(false);
+
+    if (synthesizeFlag && uniqueResults.length > 0) {
+      setSynthLoading(true);
+      try {
+        const { data } = await synthesizeSearch({
+          query: q,
+          variants: uniqueResults,
+          patient_id: pFilter || null,
+          quality: qualityFilter || null,
+        });
+        setSynthesis(data.synthesis || null);
+      } catch (err) {
+        const detail = err.response?.data?.detail || err.message || 'LLM synthesis failed';
+        setSynthError(detail);
+      } finally {
+        setSynthLoading(false);
+      }
+    }
   };
 
   const handleSearch = () => performSearch(query, patientFilter, doSynthesize);
@@ -1069,7 +1096,34 @@ function SearchPage() {
         </div>
       )}
 
-      {synthesis && (
+      {searchError && (
+        <div className="card" style={{ borderLeft: '3px solid var(--danger, #ff6b6b)', background: 'rgba(255, 107, 107, 0.06)' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
+            <strong>Search failed:</strong> {searchError}
+          </div>
+        </div>
+      )}
+
+      {synthLoading && (
+        <div className="synthesis-panel">
+          <h3><Sparkles size={14} /> Clinical Synthesis</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', color: 'var(--text-muted)' }}>
+            <Loader size={14} className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', margin: 0 }} />
+            Generating clinical synthesis (LLM cold-starts can take a few minutes)…
+          </div>
+        </div>
+      )}
+
+      {synthError && !synthLoading && (
+        <div className="synthesis-panel" style={{ borderLeft: '3px solid var(--warning, #f5a623)' }}>
+          <h3><Sparkles size={14} /> Clinical Synthesis</h3>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+            Synthesis unavailable: {synthError}
+          </div>
+        </div>
+      )}
+
+      {synthesis && !synthLoading && !synthError && (
         <div className="synthesis-panel">
           <h3><Sparkles size={14} /> Clinical Synthesis</h3>
           <div className="markdown-body" style={{ fontSize: '13px', lineHeight: 1.6, color: 'var(--text-secondary)' }}>

@@ -1,6 +1,33 @@
 import requests
 from typing import Dict, List, Any, Tuple
 
+CANONICAL_SIGNIFICANCE = {
+    "pathogenic": "Pathogenic",
+    "likely pathogenic": "Likely pathogenic",
+    "uncertain significance": "Uncertain significance",
+    "vus": "Uncertain significance",
+    "likely benign": "Likely benign",
+    "benign": "Benign",
+    "drug response": "Drug response",
+    "risk factor": "Risk factor",
+    "protective": "Protective",
+    "association": "Association",
+    "conflicting interpretations of pathogenicity": "Conflicting interpretations of pathogenicity",
+    "not provided": "Not provided",
+    "other": "Other",
+    "unknown": "Unknown",
+}
+
+
+def canonicalize_significance(sig: str) -> str:
+    if not sig:
+        return "Unknown"
+    key = sig.strip().lower()
+    if key in CANONICAL_SIGNIFICANCE:
+        return CANONICAL_SIGNIFICANCE[key]
+    return key[:1].upper() + key[1:] if key else "Unknown"
+
+
 GENE_REGIONS: List[Tuple[str, int, int, str]] = [
     ("chr17", 41160000, 41280000, "BRCA1"),
     ("chr13", 32290000, 32400000, "BRCA2"),
@@ -236,10 +263,10 @@ def parse_vcf_content(vcf_text: str, sample_id: str, patient_id: str, settings=N
         )
 
         if cache_key in cached_data:
-            cached_sig = cached_data[cache_key].get("clinical_significance", "uncertain significance")
+            cached_sig = cached_data[cache_key].get("clinical_significance", "Uncertain significance")
             cached_desc = cached_data[cache_key].get("variant_description", "")
 
-            bv["clinical_significance"] = cached_sig
+            bv["clinical_significance"] = canonicalize_significance(cached_sig)
 
             if cached_desc.startswith("Patient "):
                 clinical_part = cached_desc
@@ -269,7 +296,7 @@ def parse_vcf_content(vcf_text: str, sample_id: str, patient_id: str, settings=N
                 elif any("uncertain" in s for s in sigs):
                     sig = "Uncertain significance"
                 else:
-                    sig = rcvs[0].get("clinical_significance", "unknown")
+                    sig = canonicalize_significance(rcvs[0].get("clinical_significance", "unknown"))
 
                 conditions = rcvs[0].get("conditions", [])
                 if isinstance(conditions, list) and len(conditions) > 0:
@@ -281,8 +308,8 @@ def parse_vcf_content(vcf_text: str, sample_id: str, patient_id: str, settings=N
 
                 clinvar_id = rcvs[0].get("accession", "Unknown")
 
-                bv["clinical_significance"] = sig
-                clinical_core = f"{sig} - {disease} (ClinVar: {clinvar_id})."
+                bv["clinical_significance"] = canonicalize_significance(sig)
+                clinical_core = f"{bv['clinical_significance']} - {disease} (ClinVar: {clinvar_id})."
 
                 if get_priority(sig) > 6 and settings and settings.nvidia_api_key and getattr(settings, "llm_model", None):
                     if settings.use_api_catalog:
@@ -302,7 +329,7 @@ def parse_vcf_content(vcf_text: str, sample_id: str, patient_id: str, settings=N
                 else:
                     bv["variant_description"] = f"{variant_location} {clinical_core}"
             else:
-                bv["clinical_significance"] = "uncertain significance"
+                bv["clinical_significance"] = "Uncertain significance"
                 bv["variant_description"] = f"{variant_location} Uncertain significance."
 
         final_variants.append(bv)

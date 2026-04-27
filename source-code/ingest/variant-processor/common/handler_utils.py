@@ -1,6 +1,13 @@
 from typing import Dict, Any, List
 
 
+SKIPPABLE_STATUSES = {"skipped", "ignored"}
+
+
+def is_skip_event(event_data: Dict[str, Any]) -> bool:
+    return event_data.get("status") in SKIPPABLE_STATUSES or "variants" not in event_data
+
+
 def parse_variant_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
     variants = event_data.get("variants", [])
     if not variants:
