@@ -71,6 +71,14 @@ class S3Service:
             logging.error(f"S3 put failed: {e}")
             raise
 
+    def get_object(self, bucket: str, key: str) -> str:
+        response = self.client.get_object(Bucket=bucket, Key=key)
+        return response["Body"].read().decode("utf-8")
+
+    def get_object_by_uri(self, uri: str) -> str:
+        bucket, key = self.parse_s3_uri(uri)
+        return self.get_object(bucket, key)
+
     def copy_fastq_to_controlled_path(
         self,
         source_uri: str,

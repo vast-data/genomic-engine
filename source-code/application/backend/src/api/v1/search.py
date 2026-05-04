@@ -7,10 +7,12 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from src.config import settings
 from src.services.vastdb_service import VastDBService
 from src.services.embedding_service import EmbeddingService
 from src.services.llm_service import LLMService
 from src.services.bionemo_service import BioNeMoService
+from src.services.s3_service import S3Service
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,43 @@ vastdb = VastDBService()
 embedder = EmbeddingService()
 llm = LLMService()
 bionemo = BioNeMoService()
+s3 = S3Service()
+
+
+DOCKING_RESULTS_BUCKET = settings.s3.vcf_bucket
+DOCKING_RESULTS_PREFIX = "docking"
+
+
+def _docking_key(molecule_id: str, pdb_id: str, filename: str) -> str:
+    return f"{DOCKING_RESULTS_PREFIX}/{molecule_id}/{pdb_id}/{filename}"
+
+
+def _is_s3_uri(value: Optional[str]) -> bool:
+    return isinstance(value, str) and value.startswith("s3://")
+
+
+def _read_s3_text(uri: str) -> str:
+    try:
+        return s3.get_object_by_uri(uri)
+    except Exception as e:
+        logger.warning(f"S3 fetch failed for {uri}: {e}")
+        return ""
+
+
+def _materialize_docking_blobs(mol: Dict[str, Any]) -> None:
+    sdf_value = mol.get("docking_poses_sdf") or ""
+    pdb_value = mol.get("protein_pdb_content") or ""
+    if _is_s3_uri(sdf_value):
+        mol["docking_poses_sdf"] = _read_s3_text(sdf_value)
+    if _is_s3_uri(pdb_value):
+        mol["protein_pdb_content"] = _read_s3_text(pdb_value)
+
+
+def _strip_docking_blobs(mol: Dict[str, Any]) -> None:
+    if _is_s3_uri(mol.get("docking_poses_sdf")):
+        mol["docking_poses_sdf"] = ""
+    if _is_s3_uri(mol.get("protein_pdb_content")):
+        mol["protein_pdb_content"] = ""
 
 
 class SearchRequest(BaseModel):
@@ -175,6 +214,7 @@ async def generate_molecules(request: MoleculeRequest):
                 "docking_poses_json": row.get("docking_poses_json", ""),
                 "protein_pdb_content": row.get("protein_pdb_content", ""),
             }
+            _strip_docking_blobs(mol)
             annotations_raw = row.get("annotations", "[]")
             try:
                 mol["annotations"] = json.loads(annotations_raw) if isinstance(annotations_raw, str) else (annotations_raw or [])
@@ -238,6 +278,7 @@ async def dock_molecule(request: DockRequest):
     existing = vastdb.get_docking_result(gen_smiles, pdb_id)
     if existing:
         logger.info(f"Returning cached docking result for {gen_smiles[:30]}... + {pdb_id}")
+        _materialize_docking_blobs(existing)
         return DockResponse(
             molecule_id=request.molecule_id,
             pdb_id=pdb_id,
@@ -259,14 +300,35 @@ async def dock_molecule(request: DockRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"DiffDock docking failed: {e}")
 
-    vastdb.save_docking_result(
-        molecule_id=request.molecule_id,
-        pdb_id=pdb_id,
-        score=dock_result["best_score"],
-        poses_sdf=dock_result["best_pose_sdf"],
-        poses_json=dock_result["poses_json"],
-        protein_pdb=dock_result["protein_pdb"],
-    )
+    try:
+        poses_sdf_uri = s3.put_object(
+            DOCKING_RESULTS_BUCKET,
+            _docking_key(request.molecule_id, pdb_id, "best_pose.sdf"),
+            dock_result["best_pose_sdf"] or "",
+        )
+        protein_pdb_uri = s3.put_object(
+            DOCKING_RESULTS_BUCKET,
+            _docking_key(request.molecule_id, pdb_id, "protein.pdb"),
+            dock_result["protein_pdb"] or "",
+        )
+    except Exception as e:
+        logger.exception("Failed to upload docking artefacts to S3")
+        raise HTTPException(status_code=502, detail=f"Failed to persist docking artefacts to S3: {e}")
+
+    try:
+        vastdb.save_docking_result(
+            molecule_id=request.molecule_id,
+            pdb_id=pdb_id,
+            score=dock_result["best_score"],
+            poses_sdf_uri=poses_sdf_uri,
+            poses_json=dock_result["poses_json"],
+            protein_pdb_uri=protein_pdb_uri,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Failed to persist docking result to VastDB")
+        raise HTTPException(status_code=502, detail=f"Failed to persist docking result: {e}")
 
     if request.researcher_name:
         vastdb.append_annotation(request.molecule_id, {
@@ -293,6 +355,7 @@ async def dock_molecule(request: DockRequest):
 async def get_all_molecules():
     molecules = vastdb.get_all_molecules()
     for mol in molecules:
+        _strip_docking_blobs(mol)
         annotations_raw = mol.get("annotations", "[]")
         if isinstance(annotations_raw, str):
             try:
@@ -302,10 +365,29 @@ async def get_all_molecules():
     return {"molecules": molecules, "total": len(molecules)}
 
 
+@router.get("/search/molecules/{molecule_id}/docking-blobs")
+async def get_molecule_docking_blobs(molecule_id: str):
+    molecule = vastdb.get_molecule(molecule_id)
+    if not molecule:
+        raise HTTPException(status_code=404, detail=f"Molecule {molecule_id} not found")
+    if not molecule.get("docking_pdb_id"):
+        raise HTTPException(status_code=404, detail="Molecule has no docking result")
+
+    _materialize_docking_blobs(molecule)
+    return {
+        "molecule_id": molecule_id,
+        "pdb_id": molecule.get("docking_pdb_id", ""),
+        "docking_score": molecule.get("docking_score", 0.0),
+        "best_pose_sdf": molecule.get("docking_poses_sdf", ""),
+        "protein_pdb": molecule.get("protein_pdb_content", ""),
+    }
+
+
 @router.get("/search/molecules/{variant_id}")
 async def get_variant_molecules(variant_id: str):
     molecules = vastdb.get_molecules_for_variant(variant_id)
     for mol in molecules:
+        _strip_docking_blobs(mol)
         annotations_raw = mol.get("annotations", "[]")
         if isinstance(annotations_raw, str):
             try:

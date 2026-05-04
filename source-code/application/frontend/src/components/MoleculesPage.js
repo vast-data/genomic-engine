@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FlaskConical, Dna, Eye, MessageSquare, Search, Filter, ExternalLink } from 'lucide-react';
-import { getAllMolecules, annotateMolecule } from '../services/api';
+import { getAllMolecules, annotateMolecule, getMoleculeDockingBlobs } from '../services/api';
 
 const Viewer3D = ({ proteinPdb, ligandSdf }) => {
   const containerRef = useRef(null);
@@ -73,6 +73,30 @@ function MoleculesPage() {
   const [noteInputs, setNoteInputs] = useState({});
   const [savingNote, setSavingNote] = useState(null);
   const [viewer3dId, setViewer3dId] = useState(null);
+  const [dockingBlobs, setDockingBlobs] = useState({});
+  const [blobLoadingId, setBlobLoadingId] = useState(null);
+
+  const handleToggleViewer = async (mol) => {
+    if (viewer3dId === mol.molecule_id) {
+      setViewer3dId(null);
+      return;
+    }
+    setViewer3dId(mol.molecule_id);
+    if (dockingBlobs[mol.molecule_id]) return;
+    setBlobLoadingId(mol.molecule_id);
+    try {
+      const { data } = await getMoleculeDockingBlobs(mol.molecule_id);
+      setDockingBlobs(prev => ({
+        ...prev,
+        [mol.molecule_id]: { proteinPdb: data.protein_pdb || '', ligandSdf: data.best_pose_sdf || '' },
+      }));
+    } catch (e) {
+      console.error('Failed to load docking blobs:', e);
+      setDockingBlobs(prev => ({ ...prev, [mol.molecule_id]: { error: 'Failed to load 3D pose data' } }));
+    } finally {
+      setBlobLoadingId(null);
+    }
+  };
 
   useEffect(() => {
     const gene = searchParams.get('gene');
@@ -377,25 +401,40 @@ function MoleculesPage() {
                       </div>
                     )}
 
-                    {m.docking_pdb_id && (
-                      <div>
-                        <div
-                          style={{ fontSize: '12px', color: 'var(--accent)', marginBottom: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                          onClick={() => setViewer3dId(viewer3dId === m.molecule_id ? null : m.molecule_id)}
-                        >
-                          <Eye size={12} />
-                          {viewer3dId === m.molecule_id ? 'Hide' : 'Show'} 3D Docking View — {m.docking_pdb_id} (confidence: {(m.docking_score || 0).toFixed(3)})
-                        </div>
-                        {viewer3dId === m.molecule_id && m.docking_poses_sdf && (
-                          <Viewer3D proteinPdb={m.protein_pdb_content} ligandSdf={m.docking_poses_sdf} />
-                        )}
-                        {viewer3dId === m.molecule_id && !m.docking_poses_sdf && (
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '8px' }}>
-                            Docking was recorded but 3D pose data is not available.
+                    {m.docking_pdb_id && (() => {
+                      const blob = dockingBlobs[m.molecule_id];
+                      const isOpen = viewer3dId === m.molecule_id;
+                      const isLoading = blobLoadingId === m.molecule_id;
+                      return (
+                        <div>
+                          <div
+                            style={{ fontSize: '12px', color: 'var(--accent)', marginBottom: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            onClick={() => handleToggleViewer(m)}
+                          >
+                            <Eye size={12} />
+                            {isOpen ? 'Hide' : 'Show'} 3D Docking View — {m.docking_pdb_id} (confidence: {(m.docking_score || 0).toFixed(3)})
                           </div>
-                        )}
-                      </div>
-                    )}
+                          {isOpen && isLoading && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '8px' }}>
+                              Loading 3D pose data...
+                            </div>
+                          )}
+                          {isOpen && !isLoading && blob?.error && (
+                            <div style={{ fontSize: '11px', color: 'var(--danger)', padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '8px' }}>
+                              {blob.error}
+                            </div>
+                          )}
+                          {isOpen && !isLoading && blob?.ligandSdf && (
+                            <Viewer3D proteinPdb={blob.proteinPdb} ligandSdf={blob.ligandSdf} />
+                          )}
+                          {isOpen && !isLoading && blob && !blob.error && !blob.ligandSdf && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '8px' }}>
+                              Docking was recorded but 3D pose data is not available.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
