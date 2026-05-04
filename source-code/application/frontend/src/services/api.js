@@ -45,6 +45,7 @@ export const getAllMolecules = () => api.get('/search/molecules/all');
 export const lookupStructures = (gene) => api.get(`/search/structures/${encodeURIComponent(gene)}`);
 export const dockMolecule = (params) => api.post('/search/dock', params);
 export const getVariantMolecules = (variantId) => api.get(`/search/molecules/${encodeURIComponent(variantId)}`);
+export const getMoleculeDockingBlobs = (moleculeId) => api.get(`/search/molecules/${encodeURIComponent(moleculeId)}/docking-blobs`);
 export const annotateMolecule = (moleculeId, params) => api.post(`/search/molecules/${encodeURIComponent(moleculeId)}/annotate`, params);
 
 export default api;

@@ -4,7 +4,7 @@ import { Search, Sparkles, Database, ChevronDown, ChevronUp, Loader, BarChart2, 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { searchVariants, synthesizeSearch, getVariantById, explainVariant, getInsights, getPatient, getStats, generateMolecules, lookupStructures, dockMolecule, getVariantMolecules, annotateMolecule } from '../services/api';
+import { searchVariants, synthesizeSearch, getVariantById, explainVariant, getInsights, getPatient, getStats, generateMolecules, lookupStructures, dockMolecule, getVariantMolecules, getMoleculeDockingBlobs, annotateMolecule } from '../services/api';
 
 const Viewer3D = ({ proteinPdb, ligandSdf }) => {
   const containerRef = useRef(null);
@@ -206,7 +206,44 @@ const DrugDiscoveryPanel = ({ drugRecommendations, gene, variantId }) => {
 
   const [dockingStates, setDockingStates] = useState({});
   const [viewerMolIdx, setViewerMolIdx] = useState(null);
+  const [viewerLoadingIdx, setViewerLoadingIdx] = useState(null);
   const [savedLoading, setSavedLoading] = useState(false);
+
+  const handleToggleViewer = async (idx) => {
+    if (viewerMolIdx === idx) {
+      setViewerMolIdx(null);
+      return;
+    }
+    const ds = dockingStates[idx];
+    if (!ds?.result) return;
+    setViewerMolIdx(idx);
+    if (ds.result.best_pose_sdf) return;
+    const moleculeId = ds.result.molecule_id;
+    if (!moleculeId) return;
+    setViewerLoadingIdx(idx);
+    try {
+      const { data } = await getMoleculeDockingBlobs(moleculeId);
+      setDockingStates(prev => ({
+        ...prev,
+        [idx]: {
+          ...prev[idx],
+          result: {
+            ...prev[idx].result,
+            best_pose_sdf: data.best_pose_sdf || '',
+            protein_pdb: data.protein_pdb || '',
+          },
+        },
+      }));
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || 'Failed to load 3D pose data';
+      setDockingStates(prev => ({
+        ...prev,
+        [idx]: { ...prev[idx], blobError: detail },
+      }));
+    } finally {
+      setViewerLoadingIdx(null);
+    }
+  };
 
   useEffect(() => {
     if (!gene) return;
@@ -557,7 +594,7 @@ const DrugDiscoveryPanel = ({ drugRecommendations, gene, variantId }) => {
                       })()}
                       {ds?.result && (
                         <button
-                          onClick={() => setViewerMolIdx(showViewer ? null : idx)}
+                          onClick={() => handleToggleViewer(idx)}
                           style={{ fontSize: '10px', padding: '3px 8px', background: showViewer ? 'var(--accent)' : 'transparent', border: '1px solid var(--accent)', color: showViewer ? '#0b0c10' : 'var(--accent)', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
                         >
                           <Eye size={10} /> {showViewer ? 'Hide 3D' : 'View 3D'}
@@ -570,7 +607,19 @@ const DrugDiscoveryPanel = ({ drugRecommendations, gene, variantId }) => {
                     <div style={{ color: 'var(--danger)', fontSize: '11px', marginTop: '6px' }}>{ds.error}</div>
                   )}
 
-                  {showViewer && (
+                  {showViewer && viewerLoadingIdx === idx && (
+                    <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-muted)', padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '8px' }}>
+                      Loading 3D pose data...
+                    </div>
+                  )}
+
+                  {showViewer && viewerLoadingIdx !== idx && ds?.blobError && (
+                    <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--danger)', padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '8px' }}>
+                      {ds.blobError}
+                    </div>
+                  )}
+
+                  {showViewer && viewerLoadingIdx !== idx && !ds?.blobError && ds?.result?.best_pose_sdf && (
                     <div style={{ marginTop: '12px' }}>
                       <Viewer3D proteinPdb={ds.result.protein_pdb} ligandSdf={ds.result.best_pose_sdf} />
                       <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'center' }}>

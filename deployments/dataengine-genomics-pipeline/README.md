@@ -29,19 +29,15 @@ genomics-vcf-outputs bucket  → genomics-vcf-parser → genomics-variant-proces
 
 ## Step 1: Create VAST Platform Resources
 
+All VAST platform resources are provisioned through the **VAST Management Service (VMS) UI**. This is a one-time bootstrap.
+
 ### User and Group
 
-```bash
-vast group create --name genomics-group
-vast user create --name genomics-user \
-  --leading-group data-engine-group \
-  --group genomics-group
-vast user s3-key create --user genomics-user
-```
+1. **Identity & Access → Local Groups → Create** — name: `genomics-group`.
+2. **Identity & Access → Local Users → Create** — name: `genomics-user`, leading group: `data-engine-group`, additional group: `genomics-group`.
+3. On the `genomics-user` row, click **Generate S3 Key** and copy the **Access Key** and **Secret Key** — they go into both `genomics-ingest.yaml` and the K8s application `values.yaml`.
 
-Copy the generated **Access Key** and **Secret Key** — they go into both `genomics-ingest.yaml` and the K8s application `values.yaml`.
-
-**Required permissions for `genomics-group`:**
+**Required permissions for `genomics-group`** (create an S3 identity policy under **Identity & Access → S3 Identity Policies** and attach it to the group):
 
 | Permission | Scope |
 |---|---|
@@ -51,25 +47,28 @@ Copy the generated **Access Key** and **Secret Key** — they go into both `geno
 
 ### S3 Buckets
 
-```bash
-vast s3 bucket create --name genomics-raw-data
-vast s3 bucket create --name genomics-fastq-files
-vast s3 bucket create --name genomics-vcf-outputs
-```
+Under **Storage → Views → Create View**, create one view per bucket with these settings:
+
+| Bucket name | Protocol | Bucket owner | View policy |
+|---|---|---|---|
+| `genomics-raw-data` | **S3 BUCKET** | `genomics-user` | any S3 Native flavor policy |
+| `genomics-fastq-files` | **S3 BUCKET** | `genomics-user` | any S3 Native flavor policy |
+| `genomics-vcf-outputs` | **S3 BUCKET** | `genomics-user` | any S3 Native flavor policy |
+
+If no S3 Native view policy exists yet, create one via **Storage → View Policies → Create** with flavor `S3_NATIVE`.
 
 ### VastDB Bucket
 
-Create `genomics-data` via the VAST Management UI with **both** protocols enabled:
+Create one more view named `genomics-data` via **Storage → Views → Create View**, with **both** protocols enabled:
 
-1. Navigate to **Storage → S3 Buckets → Create Bucket**
-2. Name: `genomics-data`
-3. Enable: **S3 BUCKET** + **DATABASE**
+- Protocols: **S3 BUCKET** + **DATABASE**
+- Bucket owner: `genomics-user`
 
 Tables (`patients`, `samples`, `jobs`, `variants`) are created automatically on first write — no DDL required.
 
 ### Kafka Topic
 
-Create topic `genomics` in the DataEngine Kafka broker via the VAST Management UI.
+Under **DataEngine → Kafka Topics → Create**, create topic `genomics` in the DataEngine Kafka broker.
 
 ---
 

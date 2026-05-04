@@ -853,7 +853,7 @@ class VastDBService:
                 reader = table.select(predicate=predicate)
                 result = reader.read_all()
                 rows = result.to_pylist()
-                if rows and rows[0].get("docking_score", 0) > 0:
+                if rows and rows[0].get("docking_pdb_id"):
                     return rows[0]
                 return None
         except Exception as e:
@@ -865,39 +865,34 @@ class VastDBService:
         molecule_id: str,
         pdb_id: str,
         score: float,
-        poses_sdf: str,
+        poses_sdf_uri: str,
         poses_json: str,
-        protein_pdb: str,
-    ) -> bool:
+        protein_pdb_uri: str,
+    ) -> None:
         now = datetime.now(timezone.utc)
-        try:
-            session = self._connect()
-            with session.transaction() as tx:
-                table = self._ensure_table(tx, "molecules", MOLECULES_SCHEMA)
-                reader = table.select(
-                    predicate=_.molecule_id == molecule_id,
-                    columns=["molecule_id"],
-                    internal_row_id=True,
-                )
-                existing = reader.read_all()
-                if len(existing) == 0:
-                    return False
+        session = self._connect()
+        with session.transaction() as tx:
+            table = self._ensure_table(tx, "molecules", MOLECULES_SCHEMA)
+            reader = table.select(
+                predicate=_.molecule_id == molecule_id,
+                columns=["molecule_id"],
+                internal_row_id=True,
+            )
+            existing = reader.read_all()
+            if len(existing) == 0:
+                raise LookupError(f"Molecule {molecule_id} not found in VastDB")
 
-                row_ids = existing.column("$row_id")
-                table.update(pa.table({
-                    "$row_id": row_ids,
-                    "docking_pdb_id": pa.array([pdb_id], type=pa.utf8()),
-                    "docking_score": pa.array([score], type=pa.float64()),
-                    "docking_poses_sdf": pa.array([poses_sdf], type=pa.utf8()),
-                    "docking_poses_json": pa.array([poses_json], type=pa.utf8()),
-                    "protein_pdb_content": pa.array([protein_pdb], type=pa.utf8()),
-                    "status": pa.array(["docked"], type=pa.utf8()),
-                    "updated_at": pa.array([now], type=pa.timestamp("ns")),
-                }))
-            return True
-        except Exception as e:
-            logger.error(f"Save docking result failed: {e}")
-            return False
+            row_ids = existing.column("$row_id")
+            table.update(pa.table({
+                "$row_id": row_ids,
+                "docking_pdb_id": pa.array([pdb_id], type=pa.utf8()),
+                "docking_score": pa.array([score], type=pa.float64()),
+                "docking_poses_sdf": pa.array([poses_sdf_uri], type=pa.utf8()),
+                "docking_poses_json": pa.array([poses_json], type=pa.utf8()),
+                "protein_pdb_content": pa.array([protein_pdb_uri], type=pa.utf8()),
+                "status": pa.array(["docked"], type=pa.utf8()),
+                "updated_at": pa.array([now], type=pa.timestamp("ns")),
+            }))
 
     def append_annotation(self, molecule_id: str, annotation: Dict[str, Any]) -> bool:
         now = datetime.now(timezone.utc)
