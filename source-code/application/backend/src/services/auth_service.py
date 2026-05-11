@@ -8,6 +8,7 @@ import jwt
 import requests
 
 from src.config import settings
+from src.services.retry import call_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class AuthService:
     VMS_TIMEOUT_SECONDS = 15
-    VMS_RETRY_ATTEMPTS = 2
 
     def __init__(self) -> None:
         self.vms_host = settings.auth.vms_host
@@ -58,37 +58,36 @@ class AuthService:
         return None
 
     def _post_token(self, url: str, username: str, password: str) -> (bool, Optional[int], str):
-        last_exc = None
-        for attempt in range(self.VMS_RETRY_ATTEMPTS):
-            t0 = time.perf_counter()
-            try:
-                resp = requests.post(
+        t0 = time.perf_counter()
+        try:
+            resp = call_with_retry(
+                lambda: requests.post(
                     url,
                     json={"username": username, "password": password},
                     verify=False,
                     timeout=self.VMS_TIMEOUT_SECONDS,
-                )
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                if resp.status_code == 200:
-                    logger.info("[AUTH] vms ok url=%s elapsed_ms=%d", url, elapsed_ms)
-                    return True, resp.status_code, ""
-                if resp.status_code in (401, 403):
-                    return False, resp.status_code, resp.text or ""
-                logger.warning(
-                    "[AUTH] vms transient http=%d elapsed_ms=%d attempt=%d body=%s",
-                    resp.status_code, elapsed_ms, attempt + 1, (resp.text or "")[:160],
-                )
-                last_exc = None
-            except requests.RequestException as e:
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                logger.warning(
-                    "[AUTH] vms exception url=%s elapsed_ms=%d attempt=%d err=%s",
-                    url, elapsed_ms, attempt + 1, e,
-                )
-                last_exc = e
-            time.sleep(0.5 * (attempt + 1))
+                ),
+                operation=f"AUTH:vms_token:{url}",
+            )
+        except requests.RequestException as e:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            logger.warning(
+                "[AUTH] vms exception url=%s elapsed_ms=%d err=%s",
+                url, elapsed_ms, e,
+            )
+            return False, None, str(e)
 
-        return False, None, str(last_exc) if last_exc else "VMS unreachable"
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        if resp.status_code == 200:
+            logger.info("[AUTH] vms ok url=%s elapsed_ms=%d", url, elapsed_ms)
+            return True, resp.status_code, ""
+        if resp.status_code in (401, 403):
+            return False, resp.status_code, resp.text or ""
+        logger.warning(
+            "[AUTH] vms non-retryable http=%d elapsed_ms=%d body=%s",
+            resp.status_code, elapsed_ms, (resp.text or "")[:160],
+        )
+        return False, resp.status_code, resp.text or ""
 
     def _create_jwt(self, username: str, extra_claims: Optional[Dict[str, Any]] = None) -> str:
         now = datetime.now(timezone.utc)

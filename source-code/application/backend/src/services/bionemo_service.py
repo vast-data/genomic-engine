@@ -6,6 +6,7 @@ from urllib.parse import quote
 import requests
 
 from src.config import settings
+from src.services.retry import call_with_retry
 
 RCSB_SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
 RCSB_FILE_URL = "https://files.rcsb.org/download"
@@ -31,7 +32,10 @@ class BioNeMoService:
 
         try:
             url = f"{PUBCHEM_URL}/{quote(drug_name)}/property/CanonicalSMILES/JSON"
-            response = requests.get(url, timeout=10)
+            response = call_with_retry(
+                lambda: requests.get(url, timeout=10),
+                operation=f"PUBCHEM:lookup_smiles:{drug_name}",
+            )
             response.raise_for_status()
             data = response.json()
             props = data.get("PropertyTable", {}).get("Properties", [])
@@ -76,11 +80,14 @@ class BioNeMoService:
         }
 
         try:
-            response = requests.post(
-                self.molmim_url,
-                json=payload,
-                headers=headers,
-                timeout=120,
+            response = call_with_retry(
+                lambda: requests.post(
+                    self.molmim_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=120,
+                ),
+                operation="MOLMIM:generate",
             )
             response.raise_for_status()
             body = response.json()
@@ -116,7 +123,10 @@ class BioNeMoService:
 
         try:
             url = f"{RCSB_FILE_URL}/{pdb_id}.pdb"
-            response = requests.get(url, timeout=30)
+            response = call_with_retry(
+                lambda: requests.get(url, timeout=30),
+                operation=f"RCSB:fetch_pdb:{pdb_id}",
+            )
             response.raise_for_status()
             content = response.text
             self._pdb_cache[pdb_id] = content
@@ -165,7 +175,10 @@ class BioNeMoService:
         }
 
         try:
-            response = requests.post(RCSB_SEARCH_URL, json=query_payload, timeout=15)
+            response = call_with_retry(
+                lambda: requests.post(RCSB_SEARCH_URL, json=query_payload, timeout=15),
+                operation=f"RCSB:lookup_structures:{gene_upper}",
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -186,7 +199,10 @@ class BioNeMoService:
         for pdb_id in pdb_ids:
             try:
                 url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
-                response = requests.get(url, timeout=10)
+                response = call_with_retry(
+                    lambda: requests.get(url, timeout=10),
+                    operation=f"RCSB:metadata:{pdb_id}",
+                )
                 response.raise_for_status()
                 entry = response.json()
 
@@ -242,11 +258,14 @@ class BioNeMoService:
         }
 
         try:
-            response = requests.post(
-                self.diffdock_url,
-                headers=headers,
-                json=payload,
-                timeout=300,
+            response = call_with_retry(
+                lambda: requests.post(
+                    self.diffdock_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=300,
+                ),
+                operation=f"DIFFDOCK:dock:{pdb_id}",
             )
             response.raise_for_status()
             result = response.json()

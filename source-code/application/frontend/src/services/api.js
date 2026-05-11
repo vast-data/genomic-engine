@@ -28,7 +28,7 @@ const LLM_TIMEOUT_MS = 125000;
 
 export const login = (credentials) => api.post('/auth/login', credentials);
 export const searchVariants = (params) => api.post('/search', params);
-export const synthesizeSearch = (params) => api.post('/search/synthesize', params, { timeout: LLM_TIMEOUT_MS });
+export const synthesizeSearch = (params, options = {}) => api.post('/search/synthesize', params, { timeout: LLM_TIMEOUT_MS, ...options });
 export const getVariantById = (variantId) => api.get(`/search/variant/${encodeURIComponent(variantId)}`);
 export const explainVariant = (variant) => api.post('/search/explain', { variant }, { timeout: LLM_TIMEOUT_MS });
 export const getInsights = (variant) => api.post('/search/insights', { variant }, { timeout: LLM_TIMEOUT_MS });
@@ -47,5 +47,6 @@ export const dockMolecule = (params) => api.post('/search/dock', params);
 export const getVariantMolecules = (variantId) => api.get(`/search/molecules/${encodeURIComponent(variantId)}`);
 export const getMoleculeDockingBlobs = (moleculeId) => api.get(`/search/molecules/${encodeURIComponent(moleculeId)}/docking-blobs`);
 export const annotateMolecule = (moleculeId, params) => api.post(`/search/molecules/${encodeURIComponent(moleculeId)}/annotate`, params);
+export const adminReset = () => api.post('/admin/reset', { confirm: true }, { timeout: LLM_TIMEOUT_MS });
 
 export default api;

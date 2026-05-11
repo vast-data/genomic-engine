@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 import requests
 
 from src.config import settings
+from src.services.retry import call_with_retry
 
 NVIDIA_API_CATALOG_URL = "https://integrate.api.nvidia.com/v1"
 
@@ -36,7 +37,6 @@ def _extract_json_object(text: str) -> str:
 
 class LLMService:
     DEFAULT_TIMEOUT = 55
-    MAX_ATTEMPTS = 2
 
     def __init__(self):
         cfg = settings.llm
@@ -63,48 +63,36 @@ class LLMService:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         url = f"{self.base_url}/chat/completions"
-        last_err: Optional[Exception] = None
+        t0 = time.perf_counter()
 
-        for attempt in range(1, self.MAX_ATTEMPTS + 1):
-            t0 = time.perf_counter()
-            try:
-                response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                if response.status_code >= 500:
-                    logger.warning(
-                        "[LLM:%s] retryable http=%d elapsed_ms=%d attempt=%d body=%s",
-                        label, response.status_code, elapsed_ms, attempt,
-                        (response.text or "")[:160],
-                    )
-                    if attempt < self.MAX_ATTEMPTS:
-                        time.sleep(1.0 * attempt)
-                        continue
-                response.raise_for_status()
-                logger.info(
-                    "[LLM:%s] ok http=%d elapsed_ms=%d attempt=%d model=%s",
-                    label, response.status_code, elapsed_ms, attempt, self.model,
-                )
-                content = response.json()["choices"][0]["message"]["content"]
-                return _THINK_BLOCK_RE.sub("", content).strip()
-            except (requests.Timeout, requests.ConnectionError) as e:
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                last_err = e
-                logger.warning(
-                    "[LLM:%s] network err elapsed_ms=%d attempt=%d err=%s",
-                    label, elapsed_ms, attempt, _short_error(e),
-                )
-                if attempt < self.MAX_ATTEMPTS:
-                    time.sleep(1.0 * attempt)
-                    continue
-            except requests.HTTPError as e:
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                logger.error(
-                    "[LLM:%s] http err elapsed_ms=%d attempt=%d err=%s",
-                    label, elapsed_ms, attempt, _short_error(e),
-                )
-                raise
+        try:
+            response = call_with_retry(
+                lambda: requests.post(url, json=payload, headers=headers, timeout=timeout),
+                operation=f"LLM:{label}",
+            )
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            logger.error(
+                "[LLM:%s] http err elapsed_ms=%d err=%s",
+                label, elapsed_ms, _short_error(e),
+            )
+            raise
+        except Exception as e:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            logger.error(
+                "[LLM:%s] exhausted retries elapsed_ms=%d err=%s",
+                label, elapsed_ms, _short_error(e),
+            )
+            raise
 
-        raise last_err if last_err else RuntimeError(f"LLM:{label} exhausted retries")
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "[LLM:%s] ok http=%d elapsed_ms=%d model=%s",
+            label, response.status_code, elapsed_ms, self.model,
+        )
+        content = response.json()["choices"][0]["message"]["content"]
+        return _THINK_BLOCK_RE.sub("", content).strip()
 
     def explain_variant(self, variant: Dict[str, Any]) -> str:
         prompt = (

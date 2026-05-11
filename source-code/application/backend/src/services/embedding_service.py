@@ -5,6 +5,7 @@ from typing import List
 import requests
 
 from src.config import settings
+from src.services.retry import call_with_retry
 
 NVIDIA_API_CATALOG_URL = "https://integrate.api.nvidia.com/v1"
 
@@ -41,11 +42,14 @@ class EmbeddingService:
 
         t0 = time.perf_counter()
         try:
-            response = requests.post(
-                f"{self.base_url}/embeddings",
-                json=payload,
-                headers=headers,
-                timeout=60,
+            response = call_with_retry(
+                lambda: requests.post(
+                    f"{self.base_url}/embeddings",
+                    json=payload,
+                    headers=headers,
+                    timeout=60,
+                ),
+                operation=f"EMBED:{input_type}",
             )
         except Exception as e:
             elapsed_ms = int((time.perf_counter() - t0) * 1000)

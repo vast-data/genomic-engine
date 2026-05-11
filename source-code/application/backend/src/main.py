@@ -5,7 +5,7 @@ import os
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.v1 import search, patients, pipelines, register, auth
+from src.api.v1 import search, patients, pipelines, register, auth, admin
 from src.services.job_watcher import watch_jobs_loop
 from src.services.auth_dependencies import verify_token
 
@@ -40,6 +40,7 @@ app.include_router(search.router, prefix="/api/v1", tags=["search"], dependencie
 app.include_router(patients.router, prefix="/api/v1/patients", tags=["patients"], dependencies=dependencies)
 app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["pipelines"], dependencies=dependencies)
 app.include_router(register.router, prefix="/api/v1", tags=["register"], dependencies=dependencies)
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"], dependencies=dependencies)
 
 
 @app.get("/health")
