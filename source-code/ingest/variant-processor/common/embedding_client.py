@@ -3,6 +3,8 @@ from typing import List
 
 import requests
 
+from common.retry import call_with_retry
+
 NVIDIA_API_CATALOG_URL = "https://integrate.api.nvidia.com/v1"
 
 
@@ -29,11 +31,14 @@ class EmbeddingClient:
             "input_type": input_type,
         }
 
-        response = requests.post(
-            f"{self.base_url}/embeddings",
-            json=payload,
-            headers=headers,
-            timeout=60,
+        response = call_with_retry(
+            lambda: requests.post(
+                f"{self.base_url}/embeddings",
+                json=payload,
+                headers=headers,
+                timeout=60,
+            ),
+            operation=f"EMBED:{input_type}:n={len(texts)}",
         )
 
         if response.status_code != 200:

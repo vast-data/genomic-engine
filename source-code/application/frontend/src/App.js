@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Search, GitBranch, Users, ClipboardList, Dna, LogOut, Settings, LayoutTemplate, Activity, Info, BookOpen, FlaskConical } from 'lucide-react';
+import { Search, GitBranch, Users, ClipboardList, Dna, LogOut, Settings, LayoutTemplate, Activity, Info, BookOpen, FlaskConical, Trash2 } from 'lucide-react';
 import SearchPage from './components/SearchPage';
 import PipelineDashboard from './components/PipelineDashboard';
 import PipelineDetail from './components/PipelineDetail';
@@ -11,6 +11,7 @@ import LoginPage from './components/LoginPage';
 import PlatformDesign from './components/PlatformDesign';
 import AboutModal from './components/AboutModal';
 import TerminologyModal from './components/TerminologyModal';
+import { adminReset } from './services/api';
 import './App.css';
 
 function NavBar({ username, onLogout }) {
@@ -18,8 +19,8 @@ function NavBar({ username, onLogout }) {
   const location = useLocation();
   const current = location.pathname;
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (!event.target.closest('.dropdown')) {
@@ -29,6 +30,37 @@ function NavBar({ username, onLogout }) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleReset = async () => {
+    setSettingsOpen(false);
+    const ok = window.confirm(
+      'Reset demo data?\n\n' +
+      'This wipes the genomics-fastq-files and genomics-vcf-outputs S3 buckets, ' +
+      'drops the genomics VastDB tables (patients, samples, jobs, variants, molecules), ' +
+      'and deletes all genomic-engine K8s Jobs.\n\n' +
+      'The genomics-raw-data bucket is NOT touched. Continue?'
+    );
+    if (!ok) return;
+    setResetting(true);
+    try {
+      const { data } = await adminReset();
+      const sDel = data.s3?.total_deleted ?? 0;
+      const tDrop = data.vastdb?.dropped ?? 0;
+      const jDel = data.k8s?.deleted ?? 0;
+      window.alert(
+        `Reset complete.\n\n` +
+        `S3 objects deleted: ${sDel}\n` +
+        `VastDB tables dropped: ${tDrop}\n` +
+        `K8s jobs deleted: ${jDel}\n\n` +
+        `${data.raw_bucket_protected} preserved.`
+      );
+      window.location.reload();
+    } catch (exc) {
+      window.alert(`Reset failed: ${exc.response?.data?.detail || exc.message || exc}`);
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const tabs = [
     { path: '/', label: 'Search', icon: Search },
@@ -92,6 +124,16 @@ function NavBar({ username, onLogout }) {
             <button onClick={() => { setSettingsOpen(false); window.dispatchEvent(new CustomEvent('open-about')); }}>
               <Info size={16} />
               About
+            </button>
+            <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              style={{ color: '#ff6b6b' }}
+              title="Wipe genomics-fastq-files and genomics-vcf-outputs, drop the genomics VastDB tables, and delete all genomic-engine K8s Jobs. Preserves genomics-raw-data."
+            >
+              <Trash2 size={16} />
+              {resetting ? 'Resetting…' : 'Reset demo data'}
             </button>
           </div>
         </div>

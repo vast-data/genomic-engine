@@ -34,18 +34,7 @@ Edit `values.yaml` and fill in:
 
 ---
 
-## Step 2: Create Namespace and Apply RBAC
-
-```bash
-kubectl create namespace genomics
-kubectl apply -f deployments/genomics-k8s-application/templates/rbac.yaml
-```
-
-The RBAC manifest grants the backend service account permission to create and monitor K8s Jobs in the `genomics` namespace.
-
----
-
-## Step 3: Deploy with Helm
+## Step 2: Deploy with Helm
 
 ```bash
 helm upgrade --install genomic-engine ./deployments/genomics-k8s-application \
@@ -53,9 +42,11 @@ helm upgrade --install genomic-engine ./deployments/genomics-k8s-application \
   -f deployments/genomics-k8s-application/values.yaml
 ```
 
+The chart creates the `genomics` namespace and renders the backend RBAC (ServiceAccount, Role, RoleBinding) that grants the backend permission to manage K8s Jobs and read pod logs.
+
 ---
 
-## Step 4: Verify Pods
+## Step 3: Verify Pods
 
 ```bash
 kubectl get pods -n genomics -w
@@ -65,7 +56,7 @@ Both `backend` and `frontend` pods should reach `Running` status.
 
 ---
 
-## Step 5: Access the UI
+## Step 4: Access the UI
 
 ```bash
 kubectl get svc -n genomics

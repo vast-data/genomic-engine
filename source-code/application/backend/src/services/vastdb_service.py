@@ -894,6 +894,34 @@ class VastDBService:
                 "updated_at": pa.array([now], type=pa.timestamp("ns")),
             }))
 
+    def drop_tables(self, tables: List[str]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"tables": {}, "dropped": 0, "failed": 0}
+        try:
+            session = self._connect()
+            with session.transaction() as tx:
+                bucket = tx.bucket(self.cfg.bucket)
+                schema = bucket.schema(self.cfg.schema_name, fail_if_missing=False)
+                if schema is None:
+                    result["note"] = "schema absent"
+                    return result
+                for name in tables:
+                    table = schema.table(name, fail_if_missing=False)
+                    if table is None:
+                        result["tables"][name] = {"existed": False}
+                        continue
+                    try:
+                        table.drop()
+                        result["tables"][name] = {"existed": True, "dropped": True}
+                        result["dropped"] += 1
+                    except Exception as exc:
+                        logger.warning(f"Drop table {name} failed: {exc}")
+                        result["tables"][name] = {"existed": True, "error": str(exc)}
+                        result["failed"] += 1
+        except Exception as exc:
+            logger.error(f"drop_tables failed: {exc}")
+            result["error"] = str(exc)
+        return result
+
     def append_annotation(self, molecule_id: str, annotation: Dict[str, Any]) -> bool:
         now = datetime.now(timezone.utc)
         try:

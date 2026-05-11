@@ -51,11 +51,11 @@ Under **Storage → Views → Create View**, create one view per bucket with the
 
 | Bucket name | Protocol | Bucket owner | View policy |
 |---|---|---|---|
-| `genomics-raw-data` | **S3 BUCKET** | `genomics-user` | any S3 Native flavor policy |
-| `genomics-fastq-files` | **S3 BUCKET** | `genomics-user` | any S3 Native flavor policy |
-| `genomics-vcf-outputs` | **S3 BUCKET** | `genomics-user` | any S3 Native flavor policy |
+| `genomics-raw-data` | **S3 BUCKET** | `genomics-user` | `s3_default_policy` |
+| `genomics-fastq-files` | **S3 BUCKET** | `genomics-user` | `s3_default_policy` |
+| `genomics-vcf-outputs` | **S3 BUCKET** | `genomics-user` | `s3_default_policy` |
 
-If no S3 Native view policy exists yet, create one via **Storage → View Policies → Create** with flavor `S3_NATIVE`.
+`s3_default_policy` is the built-in permissive S3 Native view policy — it gets the pipeline running quickly. You can tighten security later by creating a scoped policy under **Storage → View Policies → Create** (flavor `S3_NATIVE`) that restricts access to only `genomics-user` / `genomics-group` and the specific actions each bucket needs, then swap it in on each view.
 
 ### VastDB Bucket
 
@@ -129,7 +129,11 @@ Navigate to **DataEngine UI → Triggers** and create:
 
 ---
 
-## Step 4: Build and Push Function Images
+## Step 4: Build and Push Function Images (Optional)
+
+> **Optional** — prebuilt images are published to Docker Hub under `vastdatasolutions/genomic-engine-*` and are used directly in [Step 5](#step-5-create-functions). Skip this step unless you need to build from local source (e.g. for a custom fork or unreleased change).
+>
+> For the automated build flow, refer to [`.gitlab-ci.yml`](https://github.com/vast-data/genomic-engine/blob/main/.gitlab-ci.yml) — see the `.vastde-build-template` job and the per-function `build-fastq-registrar`, `build-vcf-parser`, `build-variant-processor` jobs for the exact `vastde` CLI invocation and tagging rules.
 
 Ingest functions are built with the `vastde` CLI using Cloud Native Buildpacks — no Dockerfile needed.
 

@@ -1,6 +1,6 @@
 import logging
 import posixpath
-from typing import Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 import boto3
@@ -90,3 +90,41 @@ class S3Service:
         dst_key = self.build_controlled_key(patient_id, sample_id, filename)
 
         return self.copy_object(src_bucket, src_key, self.fastq_bucket, dst_key)
+
+    def list_keys(self, bucket: str, prefix: str = "") -> List[str]:
+        keys: List[str] = []
+        continuation_token: Optional[str] = None
+        while True:
+            kwargs = {"Bucket": bucket, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+            try:
+                resp = self.client.list_objects_v2(**kwargs)
+            except ClientError as e:
+                logging.warning(f"S3 list_objects_v2 failed for {bucket}: {e}")
+                return keys
+            for obj in resp.get("Contents", []) or []:
+                keys.append(obj["Key"])
+            if not resp.get("IsTruncated"):
+                break
+            continuation_token = resp.get("NextContinuationToken")
+        return keys
+
+    def wipe_bucket(self, bucket: str) -> Dict[str, int]:
+        keys = self.list_keys(bucket, "")
+        deleted = 0
+        failed = 0
+        for batch_start in range(0, len(keys), 1000):
+            batch = keys[batch_start:batch_start + 1000]
+            try:
+                resp = self.client.delete_objects(
+                    Bucket=bucket,
+                    Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+                )
+                errs = resp.get("Errors") or []
+                deleted += len(batch) - len(errs)
+                failed += len(errs)
+            except Exception as exc:
+                logging.warning(f"S3 delete_objects failed for {bucket}: {exc}")
+                failed += len(batch)
+        return {"matched": len(keys), "deleted": deleted, "failed": failed}

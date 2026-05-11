@@ -169,6 +169,34 @@ class K8sService:
             logger.warning(f"Failed to read job status for {job_name}: {e}")
             return {"phase": "Unknown"}
 
+    def delete_pipeline_jobs(self, label_selector: str = "app=genomic-engine") -> Dict[str, Any]:
+        result: Dict[str, Any] = {"matched": 0, "deleted": 0, "failed": 0, "names": []}
+        try:
+            jobs = self.batch_v1.list_namespaced_job(
+                namespace=self.namespace,
+                label_selector=label_selector,
+            )
+        except Exception as e:
+            logger.error(f"List jobs for delete failed: {e}")
+            result["error"] = str(e)
+            return result
+
+        for job in jobs.items:
+            name = job.metadata.name
+            result["matched"] += 1
+            result["names"].append(name)
+            try:
+                self.batch_v1.delete_namespaced_job(
+                    name=name,
+                    namespace=self.namespace,
+                    body=client.V1DeleteOptions(propagation_policy="Background"),
+                )
+                result["deleted"] += 1
+            except Exception as e:
+                logger.warning(f"Delete job {name} failed: {e}")
+                result["failed"] += 1
+        return result
+
     def get_job_logs(self, job_name: str) -> List[Dict[str, str]]:
         try:
             pods = self.core_v1.list_namespaced_pod(

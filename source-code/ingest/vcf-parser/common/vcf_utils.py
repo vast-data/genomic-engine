@@ -1,6 +1,8 @@
 import requests
 from typing import Dict, List, Any, Tuple
 
+from common.retry import call_with_retry
+
 CANONICAL_SIGNIFICANCE = {
     "pathogenic": "Pathogenic",
     "likely pathogenic": "Likely pathogenic",
@@ -75,10 +77,13 @@ def myvariant_lookup_batch(uncached_variants: List[Dict[str, Any]]) -> Dict[str,
         batch = hgvs_ids[i:i + batch_size]
         print(f"[MYVARIANT API] Pass 1: Querying batch of {len(batch)} variants by ID...")
         try:
-            response = requests.post(
-                "https://myvariant.info/v1/variant",
-                data={"ids": ",".join(batch), "fields": "clinvar,snpeff,vcf"},
-                timeout=30
+            response = call_with_retry(
+                lambda b=batch: requests.post(
+                    "https://myvariant.info/v1/variant",
+                    data={"ids": ",".join(b), "fields": "clinvar,snpeff,vcf"},
+                    timeout=30,
+                ),
+                operation=f"MYVARIANT:pass1:batch_{i}",
             )
             if response.status_code == 200:
                 data = response.json()
@@ -100,14 +105,17 @@ def myvariant_lookup_batch(uncached_variants: List[Dict[str, Any]]) -> Dict[str,
             positions = [str(v["position"]) for v in batch]
             print(f"[MYVARIANT API] Pass 2: Querying {len(batch)} missing variants by position (HG38 fallback)...")
             try:
-                response = requests.post(
-                    "https://myvariant.info/v1/query",
-                    data={
-                        "q": ",".join(positions), 
-                        "scopes": "clinvar.hg38.start,vcf.position", 
-                        "fields": "clinvar,snpeff,vcf"
-                    },
-                    timeout=30
+                response = call_with_retry(
+                    lambda p=positions: requests.post(
+                        "https://myvariant.info/v1/query",
+                        data={
+                            "q": ",".join(p),
+                            "scopes": "clinvar.hg38.start,vcf.position",
+                            "fields": "clinvar,snpeff,vcf",
+                        },
+                        timeout=30,
+                    ),
+                    operation=f"MYVARIANT:pass2:batch_{i}",
                 )
                 if response.status_code == 200:
                     data = response.json()
@@ -400,7 +408,10 @@ def _generate_llm_summary(api_key: str, model: str, llm_base_url: str, gene: str
     }
     
     try:
-        response = requests.post(f"{llm_base_url}/chat/completions", headers=headers, json=data, timeout=10)
+        response = call_with_retry(
+            lambda: requests.post(f"{llm_base_url}/chat/completions", headers=headers, json=data, timeout=10),
+            operation=f"LLM:variant_summary:{gene}:{chrom}:{position}",
+        )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:

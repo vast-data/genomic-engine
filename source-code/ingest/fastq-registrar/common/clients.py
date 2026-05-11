@@ -5,6 +5,8 @@ import vastdb
 import pyarrow as pa
 import requests
 
+from common.retry import call_with_retry
+
 
 class VastDBSamplesClient:
     SCHEMA_COLUMNS = pa.schema([
@@ -92,32 +94,22 @@ class BackendClient:
         patient_id: str,
         fastq_path: str,
         mock: bool = False,
-        max_retries: int = 3,
     ) -> str:
         url = f"{self.endpoint}/api/v1/pipelines/submit"
         body = {
             "sample_id": sample_id,
             "patient_id": patient_id,
             "fastq_path": fastq_path,
-            "mock": mock
+            "mock": mock,
         }
 
         headers = {
-            "Authorization": f"Bearer {self._generate_token()}"
+            "Authorization": f"Bearer {self._generate_token()}",
         }
 
-        delay = 1.0
-        for attempt in range(max_retries):
-            try:
-                response = requests.post(url, json=body, headers=headers, timeout=30)
-                response.raise_for_status()
-                return response.json().get("job_name", "")
-            except (requests.RequestException, ConnectionError) as exc:
-                if attempt == max_retries - 1:
-                    raise
-                logging.warning(f"Backend submit attempt {attempt + 1} failed: {exc}, retrying in {delay}s")
-                import time
-                time.sleep(delay)
-                delay *= 2
-
-        return ""
+        response = call_with_retry(
+            lambda: requests.post(url, json=body, headers=headers, timeout=30),
+            operation=f"BACKEND:submit_job:{sample_id}",
+        )
+        response.raise_for_status()
+        return response.json().get("job_name", "")

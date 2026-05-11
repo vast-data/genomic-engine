@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Search, Sparkles, Database, ChevronDown, ChevronUp, Loader, BarChart2, Users, Dna, Zap, Clock, Anchor, MessageSquare, FlaskConical, Eye, ExternalLink, RefreshCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -815,11 +816,118 @@ function SearchPage() {
     fetchStats();
   }, []);
 
+  const [synthContext, setSynthContext] = useState(null);
+  const [synthAttempt, setSynthAttempt] = useState(0);
+  const [synthBackoffSeconds, setSynthBackoffSeconds] = useState(0);
+  const synthAbortRef = useRef(null);
+  const synthBackoffTimerRef = useRef(null);
+  const synthRunIdRef = useRef(0);
+
+  const SYNTH_MAX_ATTEMPTS = 3;
+  const SYNTH_BACKOFF_SCHEDULE_S = [5, 15];
+
+  const cancelInFlightSynthesis = () => {
+    if (synthAbortRef.current) {
+      try { synthAbortRef.current.abort(); } catch (_) {}
+      synthAbortRef.current = null;
+    }
+    if (synthBackoffTimerRef.current) {
+      clearInterval(synthBackoffTimerRef.current);
+      synthBackoffTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => cancelInFlightSynthesis(), []);
+
+  const runSynthesis = async (ctx) => {
+    if (!ctx || !ctx.variants || ctx.variants.length === 0) return;
+
+    cancelInFlightSynthesis();
+    const runId = ++synthRunIdRef.current;
+
+    setSynthContext(ctx);
+    setSynthesis(null);
+    setSynthError(null);
+    setSynthBackoffSeconds(0);
+    setSynthLoading(true);
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= SYNTH_MAX_ATTEMPTS; attempt++) {
+      if (runId !== synthRunIdRef.current) return;
+      setSynthAttempt(attempt);
+
+      const controller = new AbortController();
+      synthAbortRef.current = controller;
+
+      try {
+        const { data } = await synthesizeSearch(
+          {
+            query: ctx.query,
+            variants: ctx.variants,
+            patient_id: ctx.patient_id || null,
+            quality: ctx.quality || null,
+          },
+          { signal: controller.signal },
+        );
+        if (runId !== synthRunIdRef.current) return;
+        setSynthesis(data.synthesis || null);
+        setSynthError(null);
+        setSynthLoading(false);
+        setSynthAttempt(0);
+        synthAbortRef.current = null;
+        return;
+      } catch (err) {
+        synthAbortRef.current = null;
+        if (runId !== synthRunIdRef.current) return;
+        if (axios.isCancel(err) || err.code === 'ERR_CANCELED' || err.name === 'CanceledError') {
+          return;
+        }
+        lastError = err.response?.data?.detail || err.message || 'LLM synthesis failed';
+
+        const backoffIdx = attempt - 1;
+        if (attempt < SYNTH_MAX_ATTEMPTS && backoffIdx < SYNTH_BACKOFF_SCHEDULE_S.length) {
+          const waitSeconds = SYNTH_BACKOFF_SCHEDULE_S[backoffIdx];
+          setSynthError(`${lastError} (attempt ${attempt}/${SYNTH_MAX_ATTEMPTS})`);
+
+          const cancelled = await new Promise((resolve) => {
+            let remaining = waitSeconds;
+            setSynthBackoffSeconds(remaining);
+            synthBackoffTimerRef.current = setInterval(() => {
+              if (runId !== synthRunIdRef.current) {
+                clearInterval(synthBackoffTimerRef.current);
+                synthBackoffTimerRef.current = null;
+                resolve(true);
+                return;
+              }
+              remaining -= 1;
+              if (remaining <= 0) {
+                clearInterval(synthBackoffTimerRef.current);
+                synthBackoffTimerRef.current = null;
+                setSynthBackoffSeconds(0);
+                resolve(false);
+              } else {
+                setSynthBackoffSeconds(remaining);
+              }
+            }, 1000);
+          });
+          if (cancelled) return;
+        }
+      }
+    }
+
+    if (runId !== synthRunIdRef.current) return;
+    setSynthError(`${lastError || 'LLM synthesis failed'} (gave up after ${SYNTH_MAX_ATTEMPTS} attempts)`);
+    setSynthLoading(false);
+    setSynthAttempt(0);
+    setSynthBackoffSeconds(0);
+  };
+
   const performSearch = async (q, pFilter, synthesizeFlag, sigOverride, geneOverride) => {
     if (!q.trim()) return;
     setLoading(true);
     setSynthesis(null);
     setSynthError(null);
+    setSynthContext(null);
     setSearchError(null);
     setPatientData(null);
     const activeSigFilter = sigOverride !== undefined ? sigOverride : sigFilter;
@@ -873,21 +981,12 @@ function SearchPage() {
     setLoading(false);
 
     if (synthesizeFlag && uniqueResults.length > 0) {
-      setSynthLoading(true);
-      try {
-        const { data } = await synthesizeSearch({
-          query: q,
-          variants: uniqueResults,
-          patient_id: pFilter || null,
-          quality: qualityFilter || null,
-        });
-        setSynthesis(data.synthesis || null);
-      } catch (err) {
-        const detail = err.response?.data?.detail || err.message || 'LLM synthesis failed';
-        setSynthError(detail);
-      } finally {
-        setSynthLoading(false);
-      }
+      runSynthesis({
+        query: q,
+        variants: uniqueResults,
+        patient_id: pFilter,
+        quality: qualityFilter,
+      });
     }
   };
 
@@ -1153,12 +1252,52 @@ function SearchPage() {
         </div>
       )}
 
-      {synthLoading && (
+      {synthLoading && synthBackoffSeconds === 0 && (
         <div className="synthesis-panel">
           <h3><Sparkles size={14} /> Clinical Synthesis</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', color: 'var(--text-muted)' }}>
             <Loader size={14} className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', margin: 0 }} />
             Generating clinical synthesis (LLM cold-starts can take a few minutes)…
+            {synthAttempt > 1 && (
+              <span style={{ color: 'var(--warning)', fontWeight: 600 }}>
+                attempt {synthAttempt}/{SYNTH_MAX_ATTEMPTS}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {synthLoading && synthBackoffSeconds > 0 && (
+        <div className="synthesis-panel" style={{ borderLeft: '3px solid var(--warning, #f5a623)' }}>
+          <h3><Sparkles size={14} /> Clinical Synthesis</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', flex: 1, minWidth: '200px' }}>
+              Attempt {synthAttempt}/{SYNTH_MAX_ATTEMPTS} failed — retrying in <strong style={{ color: 'var(--accent)' }}>{synthBackoffSeconds}s</strong>…
+              {synthError && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{synthError}</div>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                cancelInFlightSynthesis();
+                setSynthLoading(false);
+                setSynthAttempt(0);
+                setSynthBackoffSeconds(0);
+                setSynthError('Cancelled by user');
+              }}
+              style={{ fontSize: '12px', padding: '6px 12px', background: 'transparent', border: '1px solid var(--text-muted)', color: 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >
+              Cancel
+            </button>
+            {synthContext && synthContext.variants && synthContext.variants.length > 0 && (
+              <button
+                onClick={() => runSynthesis(synthContext)}
+                style={{ fontSize: '12px', padding: '6px 12px', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+                title="Skip the backoff and retry now"
+              >
+                <RefreshCw size={12} /> Retry Now
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1166,8 +1305,19 @@ function SearchPage() {
       {synthError && !synthLoading && (
         <div className="synthesis-panel" style={{ borderLeft: '3px solid var(--warning, #f5a623)' }}>
           <h3><Sparkles size={14} /> Clinical Synthesis</h3>
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            Synthesis unavailable: {synthError}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', flex: 1, minWidth: '200px' }}>
+              Synthesis unavailable: {synthError}
+            </div>
+            {synthContext && synthContext.variants && synthContext.variants.length > 0 && (
+              <button
+                onClick={() => runSynthesis(synthContext)}
+                style={{ fontSize: '12px', padding: '6px 12px', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+                title={`Retry synthesis for "${synthContext.query}" with ${synthContext.variants.length} variants`}
+              >
+                <RefreshCw size={12} /> Retry Synthesis
+              </button>
+            )}
           </div>
         </div>
       )}
