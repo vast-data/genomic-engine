@@ -95,6 +95,9 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: {{ .Values.backend.port }}
+      {{- if and (eq (.Values.backend.serviceType | default "ClusterIP") "NodePort") (and .Values.backend.nodePort (ne (int .Values.backend.nodePort) 0)) }}
+      nodePort: {{ .Values.backend.nodePort }}
+      {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -129,3 +132,6 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 80
+      {{- if and (eq (.Values.frontend.serviceType | default "ClusterIP") "NodePort") (and .Values.frontend.nodePort (ne (int .Values.frontend.nodePort) 0)) }}
+      nodePort: {{ .Values.frontend.nodePort }}
+      {{- end }}

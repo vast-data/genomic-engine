@@ -179,57 +179,78 @@ Navigate to **DataEngine UI → Triggers** and create:
 
 ---
 
-## Step 4: Build and Push Function Images (Optional)
+## Step 4: Build and Push Function Images
 
-> **Optional** — prebuilt images are published to Docker Hub under `vastdatasolutions/genomic-engine-*` and are used directly in [Step 5](#step-5-create-functions). Skip this step unless you need to build from local source (e.g. for a custom fork or unreleased change).
->
-> For the automated build flow, refer to [`.gitlab-ci.yml`](https://github.com/vast-data/genomic-engine/blob/main/.gitlab-ci.yml) — see the `.vastde-build-template` job and the per-function `build-fastq-registrar`, `build-vcf-parser`, `build-variant-processor` jobs for the exact `vastde` CLI invocation and tagging rules.
+> Builds are fully automated in GitLab CI — see the `.vastde-build-template` and the per-function `build-fastq-registrar`, `build-vcf-parser`, `build-variant-processor` jobs in the project's [`.gitlab-ci.yml`](../../.gitlab-ci.yml). The steps below are the manual equivalent for local builds or one-off pushes to a custom registry.
 
-Ingest functions are built with the `vastde` CLI using Cloud Native Buildpacks — no Dockerfile needed.
+Ingest functions are built with the `vastde` CLI using Cloud Native Buildpacks — no Dockerfile required.
 
-**Install vastde CLI:**
+**Prerequisites:** a running Docker daemon (the `vastde` builder shells out to `docker`) and `curl`.
+
+**Install the `vastde` CLI and seed its config** (one-time setup). The CLI and builder versions must match the target VAST cluster — the example below pins the pair currently used in CI for **VAST 5.4**:
 
 ```bash
+# 1. Download the CLI binary
 curl -fsSL -o vastde \
   https://github.com/vast-data/dataengine-cli/releases/download/v5.4.1-dev.c0b8b3d5/vastde_linux_amd64
 chmod +x vastde && sudo mv vastde /usr/local/bin
-vastde config set --builder-image-url vastdataorg/vast-builder:v5.4.1-dev.29d4871e
+
+# 2. Write the CLI config. `vastde functions build` reads the builder image URL
+#    from here; the auth / VMS fields can stay empty for local builds (they are
+#    only used when the CLI talks to a live VMS).
+mkdir -p ~/.vast
+cat > ~/.vast/config.toml << 'EOF'
+[auth]
+password = ''
+tenant = ''
+username = ''
+
+[servers]
+builder_image_url = 'vastdataorg/vast-builder:v5.4.1-dev.29d4871e'
+vms_url = ''
+EOF
+
+# 3. Sanity check
+vastde version
 ```
 
-CLI releases: https://github.com/vast-data/dataengine-cli/releases
+The exact pair used by CI is declared at the top of [`.gitlab-ci.yml`](../../.gitlab-ci.yml) (`VASTDE_CLI_VERSION`, `VASTDE_BUILDER_TAG`) — keep your local install in sync with those values, and bump both when targeting a newer VAST version. CLI release list: https://github.com/vast-data/dataengine-cli/releases.
 
-**Build and push:**
+> Running inside a CI container? See the `.vastde-build-template` job in `.gitlab-ci.yml` for the equivalent setup with Docker‑in‑Docker (writes the same `config.toml` to `/root/.vast/`).
+
+**Generic build & push pattern** — the same flow applies to all three ingest functions; only the source directory and component name change:
+
+```bash
+cd source-code/ingest/<function>          # fastq-registrar | vcf-parser | variant-processor
+vastde functions build genomic-engine-<function>
+docker tag  genomic-engine-<function>:latest <your-registry>/genomic-engine-<function>:<tag>
+docker push <your-registry>/genomic-engine-<function>:<tag>
+```
+
+For example, building and pushing the FASTQ registrar:
 
 ```bash
 cd source-code/ingest/fastq-registrar
 vastde functions build genomic-engine-fastq-registrar
-docker tag genomic-engine-fastq-registrar:latest vastdatasolutions/genomic-engine-fastq-registrar:<tag>
-docker push vastdatasolutions/genomic-engine-fastq-registrar:<tag>
-
-cd ../vcf-parser
-vastde functions build genomic-engine-vcf-parser
-docker tag genomic-engine-vcf-parser:latest vastdatasolutions/genomic-engine-vcf-parser:<tag>
-docker push vastdatasolutions/genomic-engine-vcf-parser:<tag>
-
-cd ../variant-processor
-vastde functions build genomic-engine-variant-processor
-docker tag genomic-engine-variant-processor:latest vastdatasolutions/genomic-engine-variant-processor:<tag>
-docker push vastdatasolutions/genomic-engine-variant-processor:<tag>
+docker tag  genomic-engine-fastq-registrar:latest <your-registry>/genomic-engine-fastq-registrar:<tag>
+docker push <your-registry>/genomic-engine-fastq-registrar:<tag>
 ```
 
-Builds are also automated in GitLab CI using the `.vastde-build-template`. CI/CD variables `DOCKER_USER` and `DOCKER_TOKEN` must be set as masked variables.
+Repeat for `vcf-parser` (from `source-code/ingest/vcf-parser`) and `variant-processor` (from `source-code/ingest/variant-processor`).
+
+> CI authenticates to the registry using the `DOCKER_USER` / `DOCKER_TOKEN` masked CI/CD variables — for local builds run `docker login <your-registry>` once before pushing.
 
 ---
 
 ## Step 5: Create Functions
 
-Navigate to **DataEngine UI → Functions** and create:
+Navigate to **DataEngine UI → Functions** and create one function per row, referencing the image you pushed in [Step 4](#step-4-build-and-push-function-images) (or the prebuilt image from your chosen registry):
 
 | Function name | Image |
 |---|---|
-| `genomics-fastq-registrar` | `vastdatasolutions/genomic-engine-fastq-registrar:latest` |
-| `genomics-vcf-parser` | `vastdatasolutions/genomic-engine-vcf-parser:latest` |
-| `genomics-variant-processor` | `vastdatasolutions/genomic-engine-variant-processor:latest` |
+| `genomics-fastq-registrar` | `<your-registry>/genomic-engine-fastq-registrar:<tag>` |
+| `genomics-vcf-parser` | `<your-registry>/genomic-engine-vcf-parser:<tag>` |
+| `genomics-variant-processor` | `<your-registry>/genomic-engine-variant-processor:<tag>` |
 
 Upload `genomics-ingest.yaml` as the shared secret (name: `genomicsecret`) for all three functions.
 
@@ -265,9 +286,10 @@ Update `processing_mode` in `genomics-ingest.yaml`, re-upload the secret in the 
 # Find the Knative service name
 kubectl get ksvc -n default | grep genomics
 
-# Force new revision (replace <ksvc-name> with the actual name)
+# Force new revision (replace <ksvc-name> with the actual name, and the image
+# with the one pushed in Step 4 — e.g. <your-registry>/genomic-engine-fastq-registrar:<tag>)
 kubectl patch ksvc <ksvc-name> -n default --type json -p '[
-  {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"docker.io/vastdatasolutions/genomic-engine-fastq-registrar:dev"},
+  {"op":"replace","path":"/spec/template/spec/containers/0/image","value":"<your-registry>/genomic-engine-fastq-registrar:<tag>"},
   {"op":"add","path":"/spec/template/metadata/annotations/force-update","value":"'"$(date +%s)"'"}
 ]'
 ```

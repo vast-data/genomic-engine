@@ -32,9 +32,55 @@ Edit `values.yaml` and fill in:
 
 `values.yaml` is git-ignored — never commit credentials.
 
+The `backend.image`, `frontend.image`, and `mock.parabricks.image` fields point to whatever registry/repo holds the built images — update them to your registry before deploying.
+
 ---
 
-## Step 2: Deploy with Helm
+## Step 2: Build and Push Application Images (Optional)
+
+> Builds are fully automated in GitLab CI — see the `.build-template` and the `build-backend`, `build-frontend`, `build-mock-parabricks` jobs in the project's [`.gitlab-ci.yml`](../../.gitlab-ci.yml). The steps below are the manual equivalent for local builds or one-off pushes to a custom registry.
+
+Backend, frontend, and the mock Parabricks container are plain Dockerfile builds. From the repo root:
+
+```bash
+docker login <your-registry>
+
+# Backend (FastAPI)
+docker build -t <your-registry>/genomic-engine-backend:<tag>        ./source-code/application/backend
+docker push  <your-registry>/genomic-engine-backend:<tag>
+
+# Frontend (React, served by nginx)
+docker build -t <your-registry>/genomic-engine-frontend:<tag>       ./source-code/application/frontend
+docker push  <your-registry>/genomic-engine-frontend:<tag>
+
+# Mock Parabricks (CPU-only dev replacement for the GPU compute container)
+docker build -t <your-registry>/genomic-engine-mock-parabricks:<tag> ./source-code/application/backend/mock/parabricks
+docker push  <your-registry>/genomic-engine-mock-parabricks:<tag>
+```
+
+Then update the image fields in `values.yaml`:
+
+```yaml
+global:
+  imageTag: <tag>
+
+backend:
+  image: <your-registry>/genomic-engine-backend
+frontend:
+  image: <your-registry>/genomic-engine-frontend
+mock:
+  parabricks:
+    image: <your-registry>/genomic-engine-mock-parabricks
+job:
+  mock:
+    image: <your-registry>/genomic-engine-mock-parabricks:<tag>
+```
+
+CI tags each image with both the semver from the repo's `VERSION` file and a stream tag (`prod` + `latest` on `main`, `dev` on other branches) — mirror whichever convention you prefer locally.
+
+---
+
+## Step 3: Deploy with Helm
 
 ```bash
 helm upgrade --install genomic-engine ./deployments/genomics-k8s-application \
@@ -46,7 +92,7 @@ The chart creates the `genomics` namespace and renders the backend RBAC (Service
 
 ---
 
-## Step 3: Verify Pods
+## Step 4: Verify Pods
 
 ```bash
 kubectl get pods -n genomics -w
@@ -56,7 +102,7 @@ Both `backend` and `frontend` pods should reach `Running` status.
 
 ---
 
-## Step 4: Access the UI
+## Step 5: Access the UI
 
 ```bash
 kubectl get svc -n genomics

@@ -6,11 +6,16 @@ backend:
   replicas: 1
   port: 8000
   serviceType: NodePort
+  # Optional fixed NodePort (30000-32767). Leave empty/0 to let Kubernetes auto-assign.
+  # Set this to a stable value to make the external port survive redeploys.
+  nodePort: 0
 
 frontend:
   image: vastdatasolutions/genomic-engine-frontend
   replicas: 1
   serviceType: NodePort
+  # Optional fixed NodePort (30000-32767). Leave empty/0 to let Kubernetes auto-assign.
+  nodePort: 0
 
 mock:
   parabricks:
