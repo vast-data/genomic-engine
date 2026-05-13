@@ -24,7 +24,7 @@ default:
     - genomic-engine-runner
 
 variables:
-  IMAGE_REGISTRY: vastdatasolutions
+  IMAGE_REGISTRY: dcache-var.vastdata.com:5000/dev/solutions/genomic-engine
   VASTDE_CLI_VERSION: "v5.4.1-dev.c0b8b3d5"
   VASTDE_BUILDER_TAG: "v5.4.1-dev.29d4871e"
 

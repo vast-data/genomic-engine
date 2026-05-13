@@ -32,6 +32,6 @@ Configure in `deployments/dataengine-genomics-pipeline/genomics-ingest.yaml`:
 ## What Runs It
 
 - **Runtime**: VAST DataEngine serverless runtime
-- **Image**: `vastdatasolutions/genomic-engine-vcf-parser:latest`
+- **Image**: `<your-registry>/genomic-engine-vcf-parser:<tag>`
 - **Build**: `vastde functions build` (Cloud Native Buildpacks — no Dockerfile)
 - **Dependencies**: `vastdb`, `boto3`, `requests`, Python 3.11

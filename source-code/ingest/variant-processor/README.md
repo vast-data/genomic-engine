@@ -31,6 +31,6 @@ Configure in `deployments/dataengine-genomics-pipeline/genomics-ingest.yaml`:
 ## What Runs It
 
 - **Runtime**: VAST DataEngine serverless runtime
-- **Image**: `vastdatasolutions/genomic-engine-variant-processor:latest`
+- **Image**: `<your-registry>/genomic-engine-variant-processor:<tag>`
 - **Build**: `vastde functions build` (Cloud Native Buildpacks — no Dockerfile)
 - **Dependencies**: `vastdb`, `openai` (NIM-compatible client), Python 3.11

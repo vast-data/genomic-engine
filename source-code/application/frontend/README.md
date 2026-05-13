@@ -30,7 +30,7 @@ UI pages map to components in `src/components/`:
 ## What Runs It
 
 - **Runtime**: Nginx web server (containerized), Kubernetes deployment in the `genomics` namespace
-- **Image**: `vastdatasolutions/genomic-engine-frontend:latest`
+- **Image**: `<your-registry>/genomic-engine-frontend:<tag>`
 - **Framework**: React 18, lucide-react icons
 - **Build**: `npm run build` → static files served by Nginx
 - **Dependencies**: Node.js for build, Nginx for serving
