@@ -2,7 +2,7 @@ global:
   imageTag: latest
 
 backend:
-  image: vastdatasolutions/genomic-engine-backend
+  image: <your-registry>/<your-namespace>/genomic-engine-backend
   replicas: 1
   port: 8000
   serviceType: NodePort
@@ -11,7 +11,7 @@ backend:
   nodePort: 0
 
 frontend:
-  image: vastdatasolutions/genomic-engine-frontend
+  image: <your-registry>/<your-namespace>/genomic-engine-frontend
   replicas: 1
   serviceType: NodePort
   # Optional fixed NodePort (30000-32767). Leave empty/0 to let Kubernetes auto-assign.
@@ -19,7 +19,7 @@ frontend:
 
 mock:
   parabricks:
-    image: vastdatasolutions/genomic-engine-mock-parabricks
+    image: <your-registry>/<your-namespace>/genomic-engine-mock-parabricks
 
 vast:
   access_key: ""
@@ -90,7 +90,7 @@ job:
         operator: "Exists"
         effect: "NoSchedule"
   mock:
-    image: vastdatasolutions/genomic-engine-mock-parabricks:dev
+    image: <your-registry>/<your-namespace>/genomic-engine-mock-parabricks:dev
     timeout_seconds: 600
     resources:
       requests:

@@ -77,7 +77,7 @@ All configuration comes from `deployments/genomics-k8s-application/values.yaml`,
 ## What Runs It
 
 - **Runtime**: Kubernetes deployment in the `genomics` namespace
-- **Image**: `vastdatasolutions/genomic-engine-backend:latest`
+- **Image**: `<your-registry>/genomic-engine-backend:<tag>`
 - **Framework**: FastAPI (Python 3.11), Uvicorn
 - **VastDB access**: Python SDK for CRUD; ADBC driver (`libadbc_driver_vastdb.so`) for vector search
 - **Dependencies**: `fastapi`, `vastdb`, `adbc-driver-manager`, `boto3`, `kubernetes`, `openai`

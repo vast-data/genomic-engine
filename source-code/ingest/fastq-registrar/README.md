@@ -29,6 +29,6 @@ Configure in `deployments/dataengine-genomics-pipeline/genomics-ingest.yaml`:
 ## What Runs It
 
 - **Runtime**: VAST DataEngine serverless runtime
-- **Image**: `vastdatasolutions/genomic-engine-fastq-registrar:latest`
+- **Image**: `<your-registry>/genomic-engine-fastq-registrar:<tag>`
 - **Build**: `vastde functions build` (Cloud Native Buildpacks — no Dockerfile)
 - **Dependencies**: `vastdb`, `requests`, Python 3.11

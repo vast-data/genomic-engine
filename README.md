@@ -141,7 +141,7 @@ The pipeline follows an **event-driven serverless architecture** where each stag
 
 | Mode | Container | Purpose |
 |---|---|---|
-| **Mock** (default) | `vastdatasolutions/genomic-engine-mock-parabricks` | CPU-only, generates deterministic synthetic VCFs — no GPUs required |
+| **Mock** (default) | `<your-registry>/genomic-engine-mock-parabricks` | CPU-only, generates deterministic synthetic VCFs — no GPUs required |
 | **GPU** | `nvcr.io/nvidia/clara/clara-parabricks:4.7.0-1` | Production-grade variant calling with full GPU acceleration |
 
 Switch between modes via `processing_mode` in `deployments/genomics-k8s-application/values.yaml`.

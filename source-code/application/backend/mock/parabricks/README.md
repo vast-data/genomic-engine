@@ -25,5 +25,5 @@ The variant pool is defined as `PATHOGENIC_VARIANTS` at the top of `mock_pbrun.p
 ## What Runs It
 
 - **Runtime**: Kubernetes Job init container
-- **Image**: `vastdatasolutions/genomic-engine-mock-parabricks:latest`
+- **Image**: `<your-registry>/genomic-engine-mock-parabricks:<tag>`
 - **Dependencies**: Python 3.11 only
