@@ -125,7 +125,7 @@ kind: Service
 metadata:
   name: frontend
 spec:
-  type: {{ .Values.frontend.serviceType }}
+  type: {{ .Values.frontend.serviceType | default "ClusterIP" }}
   selector:
     app: frontend
   ports:
