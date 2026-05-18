@@ -17,7 +17,7 @@ Configure in `deployments/dataengine-genomics-pipeline/genomics-ingest.yaml`:
 | Key | Description |
 |---|---|
 | `embeddinghost` / `embeddingport` / `embeddinghttpscheme` | Self-hosted NIM embedding endpoint |
-| `embeddingmodel` | Embedding model (default: `nvidia/llama-3.2-nv-embedqa-1b-v2`) |
+| `embeddingmodel` | Embedding model (default: `nvidia/llama-nemotron-embed-1b-v2`) |
 | `embeddingdimensions` | Vector dimensions — must match the model output (default: `2048`) |
 | `use_api_catalog` | `true` = NVIDIA API Catalog, `false` = self-hosted NIM |
 | `nvidia_api_key` | Required when `use_api_catalog: true` |

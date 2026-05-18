@@ -23,6 +23,13 @@ genomicsecret:
   vdbschema: "genomics"
 
   # Backend Integration (used by genomics-fastq-registrar)
+  # Pick ONE depending on where the DataEngine functions actually run:
+  #   - DataEngine on the same cluster as the application:
+  #       backend_url: "http://backend.genomics.svc.cluster.local:8000"
+  #   - DataEngine on a separate cluster (typical):
+  #       backend_url: "https://<your-app-hostname>"   (Gateway / Ingress URL)
+  # The function appends /api/v1/pipelines/submit, so the value above must NOT
+  # end with a trailing slash and must NOT include the /api prefix.
   backend_url: "http://backend.genomics.svc.cluster.local:8000"
   jwt_secret: ""
 
@@ -44,7 +51,7 @@ genomicsecret:
   llmhttpscheme: "http"
 
   # Embedding -- used by genomics-variant-processor for variant vectors
-  embeddingmodel: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+  embeddingmodel: "nvidia/llama-nemotron-embed-1b-v2"
   embeddingdimensions: 2048
   embeddinghost: ""
   embeddingport: "8000"

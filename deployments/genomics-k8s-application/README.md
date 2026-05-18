@@ -120,7 +120,7 @@ Set `nvidia.use_api_catalog: true` and provide `nvidia.api_key`. All NVIDIA serv
 
 | Service | Model |
 |---|---|
-| Embedding | `nvidia/llama-3.2-nv-embedqa-1b-v2` (2048 dims) |
+| Embedding | `nvidia/llama-nemotron-embed-1b-v2` (2048 dims) |
 | LLM | `meta/llama-3.1-70b-instruct` |
 | MolMIM | cloud `health.api.nvidia.com` |
 | DiffDock | cloud `health.api.nvidia.com` |
@@ -136,7 +136,7 @@ To run all NVIDIA services on-cluster — zero cloud dependency — set `nim.ena
 | Service | Image | GPU | Memory |
 |---|---|---|---|
 | `nim-llm` | `nvcr.io/nim/meta/llama-3.1-8b-instruct` | 1 | 24 Gi |
-| `nim-embed` | `nvcr.io/nim/nvidia/llama-3.2-nv-embedqa-1b-v2` | 1 | 8 Gi |
+| `nim-embed` | `nvcr.io/nim/nvidia/llama-nemotron-embed-1b-v2` | 1 | 8 Gi |
 | `nim-molmim` | `nvcr.io/nim/nvidia/molmim` | 1 | 16 Gi |
 | `nim-diffdock` | `nvcr.io/nim/mit/diffdock` | 1 | 24 Gi |
 
@@ -152,7 +152,7 @@ nvidia:
 embedding:
   host: nim-embed
   port: "8000"
-  model: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+  model: "nvidia/llama-nemotron-embed-1b-v2"
   dimensions: 2048
 
 llm:
@@ -179,7 +179,7 @@ nim:
     gpu: 1
     memory: 24Gi
   embedding:
-    image: nvcr.io/nim/nvidia/llama-3.2-nv-embedqa-1b-v2:latest
+    image: nvcr.io/nim/nvidia/llama-nemotron-embed-1b-v2:latest
     gpu: 1
     memory: 8Gi
   molmim:
