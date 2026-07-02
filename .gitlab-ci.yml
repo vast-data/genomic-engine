@@ -93,7 +93,6 @@ secret-scan:
         docker info >/dev/null 2>&1 && break
         sleep 1
       done
-    - docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
     - export VERSION=$(cat VERSION)
     - |
       if [ "$CI_COMMIT_BRANCH" = "main" ]; then
@@ -195,7 +194,6 @@ build-mock-parabricks:
       builder_image_url = 'vastdataorg/vast-builder:${VASTDE_BUILDER_TAG}'
       vms_url = ''
       EOF
-    - docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
     - export VERSION=$(cat VERSION)
     - |
       if [ "$CI_COMMIT_BRANCH" = "main" ]; then

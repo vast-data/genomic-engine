@@ -51,6 +51,7 @@ class LLMSettings(BaseModel):
     port: str = "8081"
     model: str
     system_prompt: str = ""
+    disable_reasoning: bool = True
 
 
 class JobResources(BaseModel):

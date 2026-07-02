@@ -1,7 +1,24 @@
+import re
 import requests
 from typing import Dict, List, Any, Tuple
 
 from common.retry import call_with_retry
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_OPEN_THINK_RE = re.compile(r"<think>", re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    if not text:
+        return ""
+    text = _THINK_BLOCK_RE.sub("", text)
+    lowered = text.lower()
+    if "</think>" in lowered:
+        text = text[lowered.rfind("</think>") + len("</think>"):]
+    open_match = _OPEN_THINK_RE.search(text)
+    if open_match:
+        text = text[:open_match.start()]
+    return text.strip()
 
 CANONICAL_SIGNIFICANCE = {
     "pathogenic": "Pathogenic",
@@ -400,11 +417,11 @@ def _generate_llm_summary(api_key: str, model: str, llm_base_url: str, gene: str
     data = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "You are a clinical genomics assistant."},
+            {"role": "system", "content": "/no_think\nYou are a clinical genomics assistant."},
             {"role": "user", "content": prompt}
         ],
-        "max_tokens": 150,
-        "temperature": 0.2
+        "max_tokens": 256,
+        "temperature": 0.0
     }
     
     try:
@@ -413,7 +430,7 @@ def _generate_llm_summary(api_key: str, model: str, llm_base_url: str, gene: str
             operation=f"LLM:variant_summary:{gene}:{chrom}:{position}",
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        return _strip_reasoning(response.json()["choices"][0]["message"]["content"])
     except Exception as e:
         print(f"Error calling LLM for variant {gene} {chrom}:{position}: {e}")
         return ""

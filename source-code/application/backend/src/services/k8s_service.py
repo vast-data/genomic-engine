@@ -210,27 +210,13 @@ class K8sService:
             pod_name = pod.metadata.name
             
             logs = []
-            if pod.spec.init_containers:
-                for c in pod.spec.init_containers:
-                    try:
-                        c_log = self.core_v1.read_namespaced_pod_log(pod_name, self.namespace, container=c.name)
-                        if c_log:
-                            logs.append({"content": f"--- Container: {c.name} ---"})
-                            for line in c_log.splitlines():
-                                logs.append({"content": line})
-                    except Exception:
-                        pass
-                        
-            if pod.spec.containers:
-                for c in pod.spec.containers:
-                    try:
-                        c_log = self.core_v1.read_namespaced_pod_log(pod_name, self.namespace, container=c.name)
-                        if c_log:
-                            logs.append({"content": f"--- Container: {c.name} ---"})
-                            for line in c_log.splitlines():
-                                logs.append({"content": line})
-                    except Exception:
-                        pass
+            all_containers = list(pod.spec.init_containers or []) + list(pod.spec.containers or [])
+            for c in all_containers:
+                c_log = self._read_container_log(pod_name, c.name)
+                if c_log:
+                    logs.append({"content": f"--- Container: {c.name} ---"})
+                    for line in c_log.splitlines():
+                        logs.append({"content": line})
 
             if not logs:
                 return [{"content": "No logs generated yet."}]
@@ -238,3 +224,18 @@ class K8sService:
             return logs
         except Exception as e:
             return [{"content": f"Failed to fetch logs: {e}"}]
+
+    def _read_container_log(self, pod_name: str, container_name: str) -> str:
+        try:
+            response = self.core_v1.read_namespaced_pod_log(
+                pod_name,
+                self.namespace,
+                container=container_name,
+                _preload_content=False,
+            )
+            raw = response.data
+            if isinstance(raw, bytes):
+                return raw.decode("utf-8", errors="replace")
+            return str(raw)
+        except Exception:
+            return ""
