@@ -6,14 +6,17 @@ from typing import List, Dict, Any, Optional
 import requests
 
 from src.config import settings
-from src.services.retry import call_with_retry
+from src.services.retry import DEFAULT_MAX_RETRIES, call_with_retry
 
 NVIDIA_API_CATALOG_URL = "https://integrate.api.nvidia.com/v1"
 
 logger = logging.getLogger(__name__)
 
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_OPEN_THINK_RE = re.compile(r"<think>", re.IGNORECASE)
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+NO_THINK_DIRECTIVE = "/no_think"
 
 
 def _short_error(e: Exception) -> str:
@@ -25,8 +28,21 @@ def _short_error(e: Exception) -> str:
     return msg.split("\n")[0][:200]
 
 
-def _extract_json_object(text: str) -> str:
+def _strip_reasoning(text: str) -> str:
+    if not text:
+        return ""
     text = _THINK_BLOCK_RE.sub("", text)
+    lowered = text.lower()
+    if "</think>" in lowered:
+        text = text[lowered.rfind("</think>") + len("</think>"):]
+    open_match = _OPEN_THINK_RE.search(text)
+    if open_match:
+        text = text[:open_match.start()]
+    return text.strip()
+
+
+def _extract_json_object(text: str) -> str:
+    text = _strip_reasoning(text)
     text = _JSON_FENCE_RE.sub("", text).strip()
     start = text.find("{")
     end = text.rfind("}")
@@ -37,12 +53,14 @@ def _extract_json_object(text: str) -> str:
 
 class LLMService:
     DEFAULT_TIMEOUT = 55
+    SYNTHESIZE_TIMEOUT = 180
 
     def __init__(self):
         cfg = settings.llm
         nv = settings.nvidia
         self.model = cfg.model
         self.system_prompt = cfg.system_prompt
+        self.disable_reasoning = cfg.disable_reasoning
         self.use_api_catalog = nv.use_api_catalog
         self.api_key = nv.api_key
 
@@ -51,11 +69,21 @@ class LLMService:
         else:
             self.base_url = f"http://{cfg.host}:{cfg.port}/v1"
 
+    def _system_content(self) -> str:
+        base = self.system_prompt or ""
+        if self.disable_reasoning:
+            return f"{NO_THINK_DIRECTIVE}\n{base}".strip()
+        return base
+
+    def _temperature(self, reasoning_temp: float) -> float:
+        return 0.0 if self.disable_reasoning else reasoning_temp
+
     def _post_chat(
         self,
         label: str,
         payload: Dict[str, Any],
         timeout: Optional[int] = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ) -> str:
         timeout = timeout or self.DEFAULT_TIMEOUT
         headers = {"Content-Type": "application/json"}
@@ -69,6 +97,7 @@ class LLMService:
             response = call_with_retry(
                 lambda: requests.post(url, json=payload, headers=headers, timeout=timeout),
                 operation=f"LLM:{label}",
+                max_retries=max_retries,
             )
             response.raise_for_status()
         except requests.HTTPError as e:
@@ -92,7 +121,7 @@ class LLMService:
             label, response.status_code, elapsed_ms, self.model,
         )
         content = response.json()["choices"][0]["message"]["content"]
-        return _THINK_BLOCK_RE.sub("", content).strip()
+        return _strip_reasoning(content)
 
     def explain_variant(self, variant: Dict[str, Any]) -> str:
         prompt = (
@@ -115,12 +144,12 @@ class LLMService:
         )
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self._system_content()},
             {"role": "user", "content": prompt},
         ]
         return self._post_chat(
             "explain",
-            {"model": self.model, "messages": messages, "max_tokens": 1024, "temperature": 0.3},
+            {"model": self.model, "messages": messages, "max_tokens": 1024, "temperature": self._temperature(0.3)},
         )
 
     def generate_insights(self, variant: Dict[str, Any], patient_data: Optional[Dict[str, Any]] = None) -> str:
@@ -167,7 +196,7 @@ class LLMService:
         )
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self._system_content()},
             {"role": "user", "content": prompt},
         ]
         raw = self._post_chat(
@@ -176,7 +205,7 @@ class LLMService:
                 "model": self.model,
                 "messages": messages,
                 "max_tokens": 1024,
-                "temperature": 0.2,
+                "temperature": self._temperature(0.2),
             },
         )
         return _extract_json_object(raw)
@@ -205,7 +234,7 @@ class LLMService:
         variant_text = "\n".join(variant_details)
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self._system_content()},
             {
                 "role": "user",
                 "content": (
@@ -220,7 +249,7 @@ class LLMService:
         try:
             return self._post_chat(
                 "patient_analysis",
-                {"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": 0.3},
+                {"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": self._temperature(0.3)},
             )
         except Exception as e:
             logger.error("[LLM:patient_analysis] giving up err=%s", _short_error(e))
@@ -250,7 +279,7 @@ class LLMService:
                 filter_text += f"- Minimum Quality: {quality}\n"
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self._system_content()},
             {
                 "role": "user",
                 "content": (
@@ -265,7 +294,9 @@ class LLMService:
         try:
             return self._post_chat(
                 "synthesize",
-                {"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": 0.3},
+                {"model": self.model, "messages": messages, "max_tokens": 2048, "temperature": self._temperature(0.3)},
+                timeout=self.SYNTHESIZE_TIMEOUT,
+                max_retries=1,
             )
         except Exception as e:
             return f"LLM synthesis unavailable: {_short_error(e)}"

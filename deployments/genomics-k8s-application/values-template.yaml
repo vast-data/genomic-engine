@@ -66,6 +66,10 @@ llm:
   # on the free tier (~4s vs ~26s for 300-token outputs) with comparable quality.
   # When nim.enabled: true, the in-cluster NIM container below dictates the model regardless.
   model: "nvidia/llama-3.1-nemotron-nano-8b-v1"
+  # Reasoning models (e.g. nvidia/llama-3.3-nemotron-super-49b-v1.5) emit <think>
+  # chain-of-thought by default, which leaks into the UI and breaks JSON insights.
+  # Keep true to inject /no_think and use greedy decoding for clean output.
+  disable_reasoning: true
   system_prompt: "You are a clinical genomics assistant. Given patient variant data retrieved from a genomic database, provide clear, evidence-based answers to clinical questions. Always note when findings require clinical validation. Cite specific variants and genes in your response."
 
 job:

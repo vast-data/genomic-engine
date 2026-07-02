@@ -46,6 +46,7 @@ stringData:
       host: {{ .Values.llm.host | quote }}
       port: {{ .Values.llm.port | quote }}
       model: {{ .Values.llm.model | quote }}
+      disable_reasoning: {{ .Values.llm.disable_reasoning | default true }}
       system_prompt: {{ .Values.llm.system_prompt | quote }}
     job:
 {{ toYaml .Values.job | indent 6 }}
