@@ -131,12 +131,16 @@ class K8sService:
         if job_settings.nodeSelector:
             pod_spec.node_selector = job_settings.nodeSelector
 
+        pod_metadata = client.V1ObjectMeta(labels={"app": "genomic-engine", "job-name": job_name})
+        if settings.network:
+            pod_metadata.annotations = {"k8s.v1.cni.cncf.io/networks": settings.network}
+
         job_spec = client.V1JobSpec(
             backoff_limit=0,
             active_deadline_seconds=job_settings.timeout_seconds,
             ttl_seconds_after_finished=3600,
             template=client.V1PodTemplateSpec(
-                metadata=client.V1ObjectMeta(labels={"app": "genomic-engine", "job-name": job_name}),
+                metadata=pod_metadata,
                 spec=pod_spec
             )
         )

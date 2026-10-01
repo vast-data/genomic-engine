@@ -104,6 +104,12 @@ job:
 
 processing_mode: "mock"
 
+# Optional Multus network. Leave empty to keep every pod on the cluster network.
+# When set, the backend and both Parabricks Jobs (mock and gpu) get
+# k8s.v1.cni.cncf.io/networks set to this name. The NetworkAttachmentDefinition
+# must already exist in the release namespace.
+network: ""
+
 # ---------------------------------------------------------------------------
 # Local NIM deployment (optional -- requires GPU nodes with NVIDIA drivers)
 # ---------------------------------------------------------------------------

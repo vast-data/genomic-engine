@@ -80,6 +80,7 @@ class Settings(BaseModel):
     llm: LLMSettings
     job: JobsSettings
     processing_mode: str = "mock"
+    network: str = ""
 
 
 def load_settings() -> Settings:

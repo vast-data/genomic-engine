@@ -29,6 +29,7 @@ Edit `values.yaml` and fill in:
 | `llm` | `host`, `port` (if self-hosted NIM) |
 | `bionemo` | `molmim_url`, `diffdock_url` — defaults to NVIDIA cloud, override for local NIM |
 | `processing_mode` | `mock` (default) or `gpu` |
+| `network` | Optional Multus network name. Empty leaves every pod on the cluster network. When set, the backend and both Parabricks Jobs (mock and gpu) receive `k8s.v1.cni.cncf.io/networks`. The NetworkAttachmentDefinition must exist in the release namespace. |
 
 `values.yaml` is git-ignored — never commit credentials.
 

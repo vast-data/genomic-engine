@@ -51,6 +51,7 @@ stringData:
     job:
 {{ toYaml .Values.job | indent 6 }}
     processing_mode: {{ .Values.processing_mode | quote }}
+    network: {{ .Values.network | default "" | quote }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -67,6 +68,9 @@ spec:
         app: backend
       annotations:
         checksum/config: {{ toYaml .Values | sha256sum }}
+        {{- with .Values.network | default "" }}
+        k8s.v1.cni.cncf.io/networks: {{ . | quote }}
+        {{- end }}
     spec:
       serviceAccountName: backend-sa
       containers:
