@@ -79,6 +79,11 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: {{ .Values.backend.port }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           volumeMounts:
             - name: config
               mountPath: /etc/secrets
