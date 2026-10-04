@@ -96,7 +96,7 @@ secret-scan:
     - export VERSION=$(cat VERSION)
     - |
       if [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        export IMAGE_TAGS="${VERSION} prod latest"
+        export IMAGE_TAGS="${VERSION} prod latest dev"
       else
         export IMAGE_TAGS="${VERSION} dev"
       fi
